@@ -7,34 +7,33 @@ from logging_loki import LokiQueueHandler
 
 load_dotenv()
 
-LOG_FILE_PATH = os.getenv("LOG_FILE_PATH")  # Make sure this directory exists and has write permissions
-LOKI_URL =  os.getenv("LOKI_URL") # e.g., "https://logs-prod-us-central1.grafana.net/loki/api/v1/push"
-LOKI_USERNAME = os.getenv("LOKI_USERNAME")
-LOKI_PASSWORD = os.getenv("LOKI_PASSWORD")
-
-
 logger = logging.getLogger("vhf")
 logger.setLevel(logging.INFO) # Set the lowest level of logs to be handled
 
+LOG_FILE_PATH = os.getenv("LOG_FILE_PATH")  # Make sure this directory exists and has write permissions
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-# TimedRotatingFileHandler will rotate the log file daily, keeping the last 7 files
-file_handler = TimedRotatingFileHandler(
-    filename=LOG_FILE_PATH,
-    when="midnight",
-    interval=1,
-    backupCount=7
-)
-file_handler.setFormatter(formatter)
+if LOG_FILE_PATH:
+    # TimedRotatingFileHandler will rotate the log file daily, keeping the last 7 files
+    file_handler = TimedRotatingFileHandler(
+        filename=LOG_FILE_PATH,
+        when="midnight",
+        interval=1,
+        backupCount=7
+    )
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
 
-loki_handler = LokiQueueHandler(
-    url=LOKI_URL,
-    auth=(LOKI_USERNAME, LOKI_PASSWORD),
-    tags={"application": "virtual-hedge-fundF", "environment": "production"},
-    version="1",
-)
-
-logger.addHandler(file_handler)
-logger.addHandler(loki_handler)
+LOKI_URL =  os.getenv("LOKI_URL") # e.g., "https://logs-prod-us-central1.grafana.net/loki/api/v1/push"
+if LOKI_URL:
+    LOKI_USERNAME = os.getenv("LOKI_USERNAME")
+    LOKI_PASSWORD = os.getenv("LOKI_PASSWORD")
+    loki_handler = LokiQueueHandler(
+        url=LOKI_URL,
+        auth=(LOKI_USERNAME, LOKI_PASSWORD),
+        tags={"application": "virtual-hedge-fundF", "environment": "production"},
+        version="1",
+    )
+    logger.addHandler(loki_handler)
 
 # To also see logs in console when running interactively
 if os.getenv("LOG_CONSOLE") == 'True':
