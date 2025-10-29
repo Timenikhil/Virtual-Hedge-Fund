@@ -1,0 +1,15 @@
+[tool.poetry]
+name = "virtual-hedge-fund"
+version = "0.1.0"
+description = ""
+authors = ["Timenikhil <48746822+Timenikhil@users.noreply.github.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.14"
+fastapi = "^0.120.1"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
