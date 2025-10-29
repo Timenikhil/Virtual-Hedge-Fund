@@ -4,10 +4,11 @@ version = "0.1.0"
 description = ""
 authors = ["Timenikhil <48746822+Timenikhil@users.noreply.github.com>"]
 readme = "README.md"
+package-mode = false
 
 [tool.poetry.dependencies]
 python = "^3.14"
-fastapi = "^0.120.1"
+fastapi = {extras = ["standard"], version = "^0.120.1"}
 
 
 [build-system]
