@@ -1,4 +1,6 @@
 from fastapi import FastAPI
+from prometheus_fastapi_instrumentator import Instrumentator
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from fastapi.middleware.cors import CORSMiddleware
 from vhf.api.v1 import v1
 
@@ -18,3 +20,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Prometheus monitoring
+Instrumentator().instrument(app).expose(app)
+# Tempo
+FastAPIInstrumentor.instrument_app(app)
