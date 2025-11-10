@@ -2,6 +2,8 @@ import logging
 import os
 import sys
 from logging.handlers import TimedRotatingFileHandler
+from multiprocessing import Queue
+
 from dotenv import load_dotenv
 from logging_loki import LokiQueueHandler
 
@@ -23,7 +25,7 @@ if LOG_FILE_PATH:
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
 
-LOKI_URL =  os.getenv("LOKI_URL") # e.g., "https://logs-prod-us-central1.grafana.net/loki/api/v1/push"
+LOKI_URL =  os.getenv("LOKI_URL")
 if LOKI_URL:
     LOKI_USERNAME = os.getenv("LOKI_USERNAME")
     LOKI_PASSWORD = os.getenv("LOKI_PASSWORD")
@@ -32,6 +34,7 @@ if LOKI_URL:
         auth=(LOKI_USERNAME, LOKI_PASSWORD),
         tags={"application": "virtual-hedge-fundF", "environment": "production"},
         version="1",
+        queue= Queue(-1)
     )
     logger.addHandler(loki_handler)
 
