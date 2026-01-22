@@ -4,7 +4,8 @@ from typing import List
 from fastapi import HTTPException
 
 from vhf.db.connection import client, connect
-from vhf.models.portfolio import PortfolioRequest, Portfolio
+from vhf.models.portfolio import PortfolioRequest, Portfolio, PortfolioList
+
 
 def serialize_weights(weights) -> str:
     return ",".join(map(str,weights))
@@ -32,6 +33,25 @@ def set_db_pool(pool:PortfolioRequest) -> int:
         client.commit()
         client.sync()
         return cursor.lastrowid
+
+def update_portfolio_strats(portfolioID:int, strats:List[str]) -> None:
+    """
+
+    Store the given Portfolio weights
+    :param portfolioID: portfolio id
+    :param strats: weights
+
+    """
+    connect()
+    client.sync()
+    with closing(client.cursor()) as cursor:
+        cursor.execute('''
+                       UPDATE portfolios
+                       SET SIDS = ?
+                       WHERE PID = ?''',
+                       (serialize_weights(strats), portfolioID))
+        client.commit()
+        client.sync()
 
 def update_portfolio_weights(portfolioID:int, weights:List[float]) -> None:
     """
@@ -71,3 +91,34 @@ def get_db_portfolio(name:str) -> Portfolio:
         if not record:
             raise HTTPException(status_code=404, detail="Portfolio not found")
         return Portfolio(portfolio_id=int(record[0]),portfolio_name=record[1],weights = deserialize_weights(record[2]),strategies=deserialize_strategies(record[3]),live= bool(int(record[4])))
+
+def get_ranked_list(rankBy :str,limit:int|None) -> PortfolioList:
+    """
+    Retrieve limit Portfolio by rankBy
+    :param rankBy:
+    :param limit:
+    :return:
+    """
+
+    connect()
+    client.sync()
+    with closing(client.cursor()) as cursor:
+        if limit:
+            cursor.execute('''
+                           SELECT PID, PNAME, WEIGHTS, SIDS, LIVE
+                           FROM portfolios
+                           LIMIT ?
+                           ''',(limit,))
+        else:
+            cursor.execute('''
+                           SELECT PID, PNAME, WEIGHTS, SIDS, LIVE
+                           FROM portfolios
+                           ''')
+        record = cursor.fetchall()
+        if not record:
+            return PortfolioList(portfolios=[])
+        mapper = lambda row: Portfolio(portfolio_id=int(row[0]), portfolio_name=row[1], weights=deserialize_weights(row[2]), strategies=deserialize_strategies(row[3]),live = bool(int(row[4])))
+        return PortfolioList(portfolios=list(map(mapper, record)))
+
+
+

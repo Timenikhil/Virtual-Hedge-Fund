@@ -3,7 +3,8 @@ from typing import List
 from fastapi import APIRouter, Path, HTTPException
 
 from vhf.ai.ai_selectors import selectStrat
-from vhf.db.operations import set_db_pool, get_db_portfolio, update_portfolio_weights
+from vhf.db.operations import set_db_pool, get_db_portfolio, update_portfolio_weights, update_portfolio_strats, \
+    get_ranked_list
 from vhf.models.error import HTTPError
 from vhf.logging.log import logger
 from vhf.models.portfolio import Portfolio, PortfolioList, PortfolioRequest, PortfolioSelector
@@ -52,14 +53,15 @@ async def select_portfolio(portfolioID : int, selector : PortfolioSelector | Non
     return portfolioID
 
 @router.post("/choose-portfolio")
-async def choose_portfolio(portfolioID : int, strategies : List[int]) -> int:
+async def choose_portfolio(portfolioID : int, strategies : List[str]) -> None:
     """
     Manually select portfolio from portfolio Pool.
     Updates given portfolio.
-    :param portfolioID:
+    :param strategies: strategies from given pool
+    :param portfolioID: portfolio ID
     :return:
     """
-    return portfolioID
+    update_portfolio_strats(portfolioID=portfolioID,strats=strategies)
 
 @router.post("/seed-portfolio")
 async def seed_portfolio(portfolioID : int, weights : List[int]) -> None:
@@ -75,13 +77,14 @@ async def seed_portfolio(portfolioID : int, weights : List[int]) -> None:
     update_portfolio_weights(portfolioID, weights)
 
 @router.get("/portfolios")
-async def get_portfolios(rankBy : str) -> PortfolioList:
+async def get_portfolios(rankBy : str,limit:int|None = None) -> PortfolioList:
     """
     Returns a list of portfolios ranked by rankBy.
+    :param limit: max number of portfolios to return
     :param rankBy:
     :return:
     """
-    return PortfolioList()
+    return get_ranked_list(rankBy,limit)
 
 @router.get("/portfolio")
 async def get_portfolio(portfolioName : str) -> Portfolio:
