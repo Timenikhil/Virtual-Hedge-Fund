@@ -120,5 +120,23 @@ def get_ranked_list(rankBy :str,limit:int|None) -> PortfolioList:
         mapper = lambda row: Portfolio(portfolio_id=int(row[0]), portfolio_name=row[1], weights=deserialize_weights(row[2]), strategies=deserialize_strategies(row[3]),live = bool(int(row[4])))
         return PortfolioList(portfolios=list(map(mapper, record)))
 
+def get_sids(pid:int) -> List[str]:
+    """
 
+    Retrieve Portfolio sids by Name
+
+    :param name: Portfolio
+    :return:
+    """
+    connect()
+    client.sync()
+    with closing(client.cursor()) as cursor:
+        cursor.execute('''
+                       SELECT SIDS
+                       FROM portfolios
+                       WHERE PID  = ?''', (pid,))
+        record = cursor.fetchone()
+        if not record:
+            raise HTTPException(status_code=404, detail="Portfolio not found")
+        return deserialize_strategies(record)
 

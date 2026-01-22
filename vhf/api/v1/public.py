@@ -4,7 +4,7 @@ from fastapi import APIRouter, Path, HTTPException
 
 from vhf.ai.ai_selectors import selectStrat
 from vhf.db.operations import set_db_pool, get_db_portfolio, update_portfolio_weights, update_portfolio_strats, \
-    get_ranked_list
+    get_ranked_list, get_sids
 from vhf.models.error import HTTPError
 from vhf.logging.log import logger
 from vhf.models.portfolio import Portfolio, PortfolioList, PortfolioRequest, PortfolioSelector
@@ -38,19 +38,21 @@ async def select_portfolio(portfolioID : int) -> int:
     Ai selects the selector
     :return:
     """
-    return portfolioID
+
+    selector = selectSelector(portfolioID)
+    strategies = selectorStrat(get_sids(portfolioID),selector)
+    update_portfolio_strats(portfolioID=portfolioID,strats=strategies)
 
 @router.post("/select-portfolio")
-async def select_portfolio(portfolioID : int, selector : PortfolioSelector | None = None) -> int:
+async def select_portfolio(portfolioID : int, selector : PortfolioSelector | None = None,k = 10) -> None:
     """
     Update portfolio using selector
     :param portfolioID:
     :param selector:
     :return:
     """
-    if selector is not None:
-        pass
-    return portfolioID
+    strategies = selectorStrat(get_sids(portfolioID),selector)
+    update_portfolio_strats(portfolioID=portfolioID,strats=strategies)
 
 @router.post("/choose-portfolio")
 async def choose_portfolio(portfolioID : int, strategies : List[str]) -> None:
