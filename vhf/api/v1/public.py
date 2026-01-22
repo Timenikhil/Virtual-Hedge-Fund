@@ -1,6 +1,9 @@
 from typing import List
 
 from fastapi import APIRouter, Path, HTTPException
+
+from vhf.ai.ai_selectors import selectStrat
+from vhf.db.operations import set_db_pool, get_db_portfolio
 from vhf.models.error import HTTPError
 from vhf.logging.log import logger
 from vhf.models.portfolio import Portfolio, PortfolioList, PortfolioRequest, PortfolioSelector
@@ -14,7 +17,7 @@ async def select_pool(pool : PortfolioRequest) -> int:
     :param pool:
     :return: Portfolio ID
     """
-    return -1
+    return set_db_pool(pool)
 
 @router.post("/ai-select-pool")
 async def select_pool(poolName : str, prompt : str | None = None) -> int:
@@ -23,7 +26,8 @@ async def select_pool(poolName : str, prompt : str | None = None) -> int:
     :param poolName:
     :return: Portfolio ID
     """
-    return -1
+    pool = PortfolioRequest(portfolio_name=poolName, strategies = selectStrat(prompt))
+    return await select_pool(pool)
 
 @router.post("/ai-select-portfolio")
 async def select_portfolio(portfolioID : int) -> int:
@@ -86,4 +90,4 @@ async def get_portfolio(portfolioName : str) -> Portfolio:
     :param portfolioName:
     :return:
     """
-    return Portfolio()
+    return get_db_portfolio(portfolioName)

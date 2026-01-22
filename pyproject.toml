@@ -7,13 +7,15 @@ readme = "README.md"
 package-mode = false
 
 [tool.poetry.dependencies]
-python = "^3.14"
+python = "^3.13"
 fastapi = {extras = ["standard"], version = "^0.120.1"}
 requests = "^2.32.5"
 python-logging-loki = "^0.3.1"
 prometheus-fastapi-instrumentator = "^7.1.0"
 opentelemetry-instrumentation-fastapi = "^0.59b0"
 opentelemetry-exporter-otlp = "^1.38.0"
+libsql-client = "^0.3.1"
+libsql = "^0.1.11"
 
 
 
