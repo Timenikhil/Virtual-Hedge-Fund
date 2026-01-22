@@ -3,7 +3,7 @@ from typing import List
 from fastapi import APIRouter, Path, HTTPException
 
 from vhf.ai.ai_selectors import selectStrat
-from vhf.db.operations import set_db_pool, get_db_portfolio
+from vhf.db.operations import set_db_pool, get_db_portfolio, update_portfolio_weights
 from vhf.models.error import HTTPError
 from vhf.logging.log import logger
 from vhf.models.portfolio import Portfolio, PortfolioList, PortfolioRequest, PortfolioSelector
@@ -70,7 +70,7 @@ async def seed_portfolio(portfolioID : int, weights : List[int]) -> None:
     :param weights:
     :return:
     """
-    return portfolioID
+    update_portfolio_weights(portfolioID, weights)
 
 
 
