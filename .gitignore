@@ -1,3 +1,10 @@
 __pycache__/
 
 .vscode/
+.DS_Store
+
+logs/
+.env
+
+# Ignore local database files
+vhf.db*
