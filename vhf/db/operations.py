@@ -3,20 +3,23 @@ from typing import List
 
 from fastapi import HTTPException
 
-from vhf.db.connection import client, connect
+from vhf.db import connection
 from vhf.models.portfolio import PortfolioRequest, Portfolio, PortfolioList
 
 
 def serialize_weights(weights) -> str:
-    return ",".join(map(str,weights))
+    return ",".join(map(str, weights))
+
 
 def deserialize_weights(weights) -> List[float]:
     return [] if weights is None else [float(x) for x in weights.split(",")]
 
+
 def deserialize_strategies(strategies) -> list[str]:
     return strategies.split(",")
 
-def set_db_pool(pool:PortfolioRequest) -> int:
+
+def set_db_pool(pool: PortfolioRequest) -> int:
     """
 
     Store the given Portfolio in the database and return the portfolio id
@@ -24,17 +27,21 @@ def set_db_pool(pool:PortfolioRequest) -> int:
     :param pool: Selected pool
     :return: portfolio id
     """
-    connect()
-    client.sync()
-    with closing(client.cursor()) as cursor:
-        cursor.execute('''
+    connection.connect()
+    connection.client.sync()
+    with closing(connection.client.cursor()) as cursor:
+        cursor.execute(
+            """
                        INSERT INTO portfolios (PNAME,SIDS,LIVE)
-                       VALUES (?,?,0)''', (pool.portfolio_name, serialize_weights(pool.strategies)))
-        client.commit()
-        client.sync()
+                       VALUES (?,?,0)""",
+            (pool.portfolio_name, serialize_weights(pool.strategies)),
+        )
+        connection.client.commit()
+        connection.client.sync()
         return cursor.lastrowid
 
-def update_portfolio_strats(portfolioID:int, strats:List[str]) -> None:
+
+def update_portfolio_strats(portfolioID: int, strats: List[str]) -> None:
     """
 
     Store the given Portfolio weights
@@ -42,18 +49,21 @@ def update_portfolio_strats(portfolioID:int, strats:List[str]) -> None:
     :param strats: weights
 
     """
-    connect()
-    client.sync()
-    with closing(client.cursor()) as cursor:
-        cursor.execute('''
+    connection.connect()
+    connection.client.sync()
+    with closing(connection.client.cursor()) as cursor:
+        cursor.execute(
+            """
                        UPDATE portfolios
                        SET SIDS = ?
-                       WHERE PID = ?''',
-                       (serialize_weights(strats), portfolioID))
-        client.commit()
-        client.sync()
+                       WHERE PID = ?""",
+            (serialize_weights(strats), portfolioID),
+        )
+        connection.client.commit()
+        connection.client.sync()
 
-def update_portfolio_weights(portfolioID:int, weights:List[float]) -> None:
+
+def update_portfolio_weights(portfolioID: int, weights: List[float]) -> None:
     """
 
     Store the given Portfolio weights
@@ -61,18 +71,21 @@ def update_portfolio_weights(portfolioID:int, weights:List[float]) -> None:
     :param weights: weights
 
     """
-    connect()
-    client.sync()
-    with closing(client.cursor()) as cursor:
-        cursor.execute('''
+    connection.connect()
+    connection.client.sync()
+    with closing(connection.client.cursor()) as cursor:
+        cursor.execute(
+            """
                        UPDATE portfolios
                        SET WEIGHTS = ?
-                       WHERE PID = ?''',
-                       (serialize_weights(weights), portfolioID))
-        client.commit()
-        client.sync()
+                       WHERE PID = ?""",
+            (serialize_weights(weights), portfolioID),
+        )
+        connection.client.commit()
+        connection.client.sync()
 
-def get_db_portfolio(name:str) -> Portfolio:
+
+def get_db_portfolio(name: str) -> Portfolio:
     """
 
     Retrieve Portfolio by Name
@@ -80,19 +93,29 @@ def get_db_portfolio(name:str) -> Portfolio:
     :param name: Portfolio
     :return:
     """
-    connect()
-    client.sync()
-    with closing(client.cursor()) as cursor:
-        cursor.execute('''
+    connection.connect()
+    connection.client.sync()
+    with closing(connection.client.cursor()) as cursor:
+        cursor.execute(
+            """
                         SELECT PID, PNAME, WEIGHTS, SIDS, LIVE
                         FROM portfolios 
-                        WHERE PNAME  = ?''', (name,))
+                        WHERE PNAME  = ?""",
+            (name,),
+        )
         record = cursor.fetchone()
         if not record:
             raise HTTPException(status_code=404, detail="Portfolio not found")
-        return Portfolio(portfolio_id=int(record[0]),portfolio_name=record[1],weights = deserialize_weights(record[2]),strategies=deserialize_strategies(record[3]),live= bool(int(record[4])))
+        return Portfolio(
+            portfolio_id=int(record[0]),
+            portfolio_name=record[1],
+            weights=deserialize_weights(record[2]),
+            strategies=deserialize_strategies(record[3]),
+            live=bool(int(record[4])),
+        )
 
-def get_ranked_list(rankBy :str,limit:int|None) -> PortfolioList:
+
+def get_ranked_list(rankBy: str, limit: int | None) -> PortfolioList:
     """
     Retrieve limit Portfolio by rankBy
     :param rankBy:
@@ -100,27 +123,39 @@ def get_ranked_list(rankBy :str,limit:int|None) -> PortfolioList:
     :return:
     """
 
-    connect()
-    client.sync()
-    with closing(client.cursor()) as cursor:
+    connection.connect()
+    connection.client.sync()
+    with closing(connection.client.cursor()) as cursor:
         if limit:
-            cursor.execute('''
+            cursor.execute(
+                """
                            SELECT PID, PNAME, WEIGHTS, SIDS, LIVE
                            FROM portfolios
                            LIMIT ?
-                           ''',(limit,))
+                           """,
+                (limit,),
+            )
         else:
-            cursor.execute('''
+            cursor.execute(
+                """
                            SELECT PID, PNAME, WEIGHTS, SIDS, LIVE
                            FROM portfolios
-                           ''')
+                           """
+            )
         record = cursor.fetchall()
         if not record:
             return PortfolioList(portfolios=[])
-        mapper = lambda row: Portfolio(portfolio_id=int(row[0]), portfolio_name=row[1], weights=deserialize_weights(row[2]), strategies=deserialize_strategies(row[3]),live = bool(int(row[4])))
+        mapper = lambda row: Portfolio(
+            portfolio_id=int(row[0]),
+            portfolio_name=row[1],
+            weights=deserialize_weights(row[2]),
+            strategies=deserialize_strategies(row[3]),
+            live=bool(int(row[4])),
+        )
         return PortfolioList(portfolios=list(map(mapper, record)))
 
-def get_sids(pid:int) -> List[str]:
+
+def get_sids(pid: int) -> List[str]:
     """
 
     Retrieve Portfolio sids by Name
@@ -131,12 +166,14 @@ def get_sids(pid:int) -> List[str]:
     connect()
     client.sync()
     with closing(client.cursor()) as cursor:
-        cursor.execute('''
+        cursor.execute(
+            """
                        SELECT SIDS
                        FROM portfolios
-                       WHERE PID  = ?''', (pid,))
+                       WHERE PID  = ?""",
+            (pid,),
+        )
         record = cursor.fetchone()
         if not record:
             raise HTTPException(status_code=404, detail="Portfolio not found")
         return deserialize_strategies(record)
-
