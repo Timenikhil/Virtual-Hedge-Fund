@@ -2,7 +2,7 @@ from typing import List
 
 from fastapi import APIRouter, Path, HTTPException
 
-from vhf.ai.ai_selectors import selectStrat
+from vhf.ai.ai_selectors import selectStrat, selectSelector
 from vhf.db.operations import set_db_pool, get_db_portfolio, update_portfolio_weights, update_portfolio_strats, \
     get_ranked_list, get_sids
 from vhf.models.error import HTTPError
@@ -39,8 +39,8 @@ async def select_portfolio(portfolioID : int) -> int:
     :return:
     """
 
-    selector = selectSelector(portfolioID)
-    strategies = selectorStrat(get_sids(portfolioID),selector)
+    selector,k = selectSelector(portfolioID)
+    strategies = selectorStrat(get_sids(portfolioID),selector,k)
     update_portfolio_strats(portfolioID=portfolioID,strats=strategies)
 
 @router.post("/select-portfolio")
@@ -51,7 +51,7 @@ async def select_portfolio(portfolioID : int, selector : PortfolioSelector | Non
     :param selector:
     :return:
     """
-    strategies = selectorStrat(get_sids(portfolioID),selector)
+    strategies = selectorStrat(get_sids(portfolioID),selector,k)
     update_portfolio_strats(portfolioID=portfolioID,strats=strategies)
 
 @router.post("/choose-portfolio")
