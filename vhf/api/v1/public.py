@@ -27,7 +27,7 @@ async def select_pool(poolName : str, prompt : str | None = None) -> int:
     :return: Portfolio ID
     """
     pool = PortfolioRequest(portfolio_name=poolName, strategies = selectStrat(prompt))
-    return await select_pool(pool)
+    return set_db_pool(pool)
 
 @router.post("/ai-select-portfolio")
 async def select_portfolio(portfolioID : int) -> int:
@@ -70,9 +70,9 @@ async def seed_portfolio(portfolioID : int, weights : List[int]) -> None:
     :param weights:
     :return:
     """
+    total = sum(weights)
+    weights = [x/total for x in weights]
     update_portfolio_weights(portfolioID, weights)
-
-
 
 @router.get("/portfolios")
 async def get_portfolios(rankBy : str) -> PortfolioList:
