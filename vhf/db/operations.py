@@ -158,14 +158,14 @@ def get_ranked_list(rankBy: str, limit: int | None) -> PortfolioList:
 def get_sids(pid: int) -> List[str]:
     """
 
-    Retrieve Portfolio sids by Name
+    Retrieve Sids by Portfolio id
 
     :param name: Portfolio
     :return:
     """
-    connect()
-    client.sync()
-    with closing(client.cursor()) as cursor:
+    connection.connect()
+    connection.client.sync()
+    with closing(connection.client.cursor()) as cursor:
         cursor.execute(
             """
                        SELECT SIDS
