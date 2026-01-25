@@ -89,7 +89,7 @@ export default function PortfolioManagement() {
     const handleStep3Submit = async () => {
         if (!portfolioId) return;
         try {
-            await portfolioAPI.choosePortfolio(portfolioId,selectedStrategies );
+            await portfolioAPI.choosePortfolio(portfolioId,selectedStrategies);
             handleStepComplete(3);
         } catch (error) {
             console.error('Error in Step 3:', error);
@@ -263,10 +263,9 @@ export default function PortfolioManagement() {
                                 onToggleStrategy={toggleStrategy}
                             />
                             <button
-                                onClick={() => handleStep3Submit}
-                                disabled={!portfolioId || selectedStrategies.length === 0}
-                                className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
-                            >
+                                onClick={handleStep3Submit}
+                                disabled={ !portfolioId || selectedStrategies.length === 0}
+                                className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2">
                                 <Play className="w-4 h-4" />
                                 Confirm Selection
                             </button>
