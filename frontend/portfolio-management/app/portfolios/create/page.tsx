@@ -28,8 +28,8 @@ export default function PortfolioManagement() {
     const [strategies, setStrategies] = useState<Strategy[]>(INITIAL_STRATEGIES);
     const [selectedStrategies, setSelectedStrategies] = useState<string[]>([]);
     const [aiPrompt, setAiPrompt] = useState('');
-    const [selector, setSelector] = useState('topk');
-    const [selectorK, setSelectorK] = useState(10);
+    const [selector, setSelector] = useState<string | null>('topk');
+    const [selectorK, setSelectorK] = useState<number | null>(10);
     const [weights, setWeights] = useState<number[]>([]);
 
     const [stepStatus, setStepStatus] = useState({
@@ -221,21 +221,24 @@ export default function PortfolioManagement() {
                             {workflowMode === 'manual' && (
                                 <>
                                     <select
-                                        value={selector}
-                                        onChange={(e) => setSelector(e.target.value)}
+                                        value={selector || ''}
+                                        onChange={(e) => setSelector(e.target.value || null)}
                                         className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                                     >
+                                        <option value="">No Selector</option>
                                         <option value="topk">Top K</option>
                                         <option value="bottomk">Bottom K</option>
                                         <option value="ai">AI Selection</option>
                                     </select>
-                                    <input
-                                        type="number"
-                                        placeholder="K value"
-                                        value={selectorK}
-                                        onChange={(e) => setSelectorK(parseInt(e.target.value))}
-                                        className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                    />
+                                    {selector && selector !== 'ai' && (
+                                        <input
+                                            type="number"
+                                            placeholder="K value"
+                                            value={selectorK || ''}
+                                            onChange={(e) => setSelectorK(e.target.value ? parseInt(e.target.value) : null)}
+                                            className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        />
+                                    )}
                                 </>
                             )}
                             <button

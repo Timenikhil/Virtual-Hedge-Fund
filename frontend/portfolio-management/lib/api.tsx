@@ -26,11 +26,15 @@ export const portfolioAPI = {
         return await response.json();
     },
 
-    selectPortfolio: async (portfolio_id: number, selector: string, k: number): Promise<string[]> => {
+    selectPortfolio: async (portfolio_id: number, selector: string | null, k: number | null): Promise<string[]> => {
         const response = await fetch(`${API_BASE_URL}/select-portfolio`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ portfolio_id, selector, k })
+            body: JSON.stringify({
+                portfolio_id,
+                selector: selector || null,
+                k: k || null
+            })
         });
         if (!response.ok) throw new Error('Failed to select portfolio');
         return await response.json();
