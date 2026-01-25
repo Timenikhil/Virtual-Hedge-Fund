@@ -24,6 +24,8 @@ export default function PortfoliosPage() {
     const [searchQuery, setSearchQuery] = useState('');
     const [filterStrategyCount, setFilterStrategyCount] = useState('');
     const [filterMinValue, setFilterMinValue] = useState('');
+    const [filterMaxStrategyCount, setFilterMaxStrategyCount] = useState('');
+    const [filterMaxValue, setFilterMaxValue] = useState('');
     const router = useRouter();
 
     useEffect(() => {
@@ -60,9 +62,11 @@ export default function PortfoliosPage() {
 
     const filteredPortfolios = portfolios.filter(portfolio => {
         const matchesSearch = portfolio.name.toLowerCase().includes(searchQuery.toLowerCase());
-        const matchesStratCount = !filterStrategyCount || portfolio.strategy_count >= parseInt(filterStrategyCount);
+        const matchesMinStratCount = !filterStrategyCount || portfolio.strategy_count >= parseInt(filterStrategyCount);
+        const matchesMaxStratCount = !filterMaxStrategyCount || portfolio.strategy_count <= parseInt(filterMaxStrategyCount);
         const matchesMinValue = !filterMinValue || (portfolio.total_value || 0) >= parseInt(filterMinValue);
-        return matchesSearch && matchesStratCount && matchesMinValue;
+        const matchesMaxValue = !filterMaxValue || (portfolio.total_value || 0) <= parseInt(filterMaxValue);
+        return matchesSearch && matchesMinStratCount && matchesMaxStratCount && matchesMinValue && matchesMaxValue;
     });
 
     if (loading) {
@@ -103,6 +107,10 @@ export default function PortfoliosPage() {
                         setFilterStrategyCount={setFilterStrategyCount}
                         filterMinValue={filterMinValue}
                         setFilterMinValue={setFilterMinValue}
+                        filterMaxStrategyCount={filterMaxStrategyCount}
+                        setFilterMaxStrategyCount={setFilterMaxStrategyCount}
+                        filterMaxValue={filterMaxValue}
+                        setFilterMaxValue={setFilterMaxValue}
                     />
 
                     {filteredPortfolios.length === 0 ? (
