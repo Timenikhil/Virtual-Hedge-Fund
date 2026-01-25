@@ -30,7 +30,7 @@ class PortfolioRequest(PortfolioID):
     strategies: List[str] # ids of strategies
 
 class PortfolioWeights(PortfolioID):
-    weights : List[int]
+    weights : List[float]
 
 class PortfolioSelectorRequest(PortfolioID) :
     selector : PortfolioSelector | None = None,
