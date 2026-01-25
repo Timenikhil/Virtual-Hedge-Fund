@@ -1,6 +1,7 @@
 'use client';
 
 import { useAuth } from '@/contexts/AuthContext';
+import Link from "next/link";
 
 export const Navbar = () => {
     const { logout, user } = useAuth();
@@ -8,7 +9,9 @@ export const Navbar = () => {
     return (
         <nav className="bg-white border-b px-6 py-4">
             <div className="flex items-center justify-between max-w-6xl mx-auto">
-                <h1 className="text-xl font-bold">Virtual Hedge Fund</h1>
+                <Link href="/portfolios" className="text-xl font-bold hover:text-blue-600 transition-colors">
+                    Virtual Hedge Fund
+                </Link>
                 <div className="flex items-center gap-3">
                     <span className="text-sm text-gray-600">{user?.email}</span>
                     <button
