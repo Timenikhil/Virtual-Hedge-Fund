@@ -6,6 +6,7 @@ import { portfolioAPI } from '@/lib/api';
 import { StrategySelector, Strategy } from '@/components/StrategySelector';
 import { StepCard } from '@/components/StepCard';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
+import {useRouter} from "next/navigation";
 
 const INITIAL_STRATEGIES: Strategy[] = [
     { id: 'strat-1', name: 'Momentum Strategy', description: 'Trend-following based on price momentum', category: 'Trend' },
@@ -19,6 +20,7 @@ const INITIAL_STRATEGIES: Strategy[] = [
 ];
 
 export default function PortfolioManagement() {
+    const router = useRouter();
     const [workflowMode, setWorkflowMode] = useState<'manual' | 'automatic'>('manual');
     const [currentStep, setCurrentStep] = useState(1);
     const [portfolioName, setPortfolioName] = useState('');
@@ -106,6 +108,7 @@ export default function PortfolioManagement() {
             console.error('Error in Step 4:', error);
         }
     };
+
 
     const toggleStrategy = useCallback((strategyId: string) => {
         setSelectedStrategies(prev =>
@@ -330,7 +333,7 @@ export default function PortfolioManagement() {
                         <div className="mt-4 space-y-3">
                             <p className="text-sm text-gray-600">Configure automatic rebalancing rules</p>
                             <button
-                                onClick={() => handleStepComplete(5)}
+                                onClick={() => router.push(`/portfolios/${portfolioId}`)}
                                 disabled={!portfolioId}
                                 className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
                             >
