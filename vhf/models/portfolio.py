@@ -19,11 +19,19 @@ class PortfolioSelector(str,Enum):
     bottomk = "bottomk"
     ai = "ai"  # allows ai to choose selection strategy
 
-class PortfolioRequest(BaseModel):
+class PortfolioCreationRequest(BaseModel):
     portfolio_name: str
     strategies: List[str] # ids of strategies
 
-class PortfolioSelectorRequest(BaseModel) :
-    portfolioID : int
+class PortfolioID(BaseModel):
+    portfolio_id: int
+
+class PortfolioRequest(PortfolioID):
+    strategies: List[str] # ids of strategies
+
+class PortfolioWeights(PortfolioID):
+    weights : List[int]
+
+class PortfolioSelectorRequest(PortfolioID) :
     selector : PortfolioSelector | None = None,
     k:int = 10

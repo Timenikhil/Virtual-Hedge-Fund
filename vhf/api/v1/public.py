@@ -8,12 +8,13 @@ from vhf.db.operations import set_db_pool, get_db_portfolio, update_portfolio_we
     get_ranked_list, get_sids
 from vhf.models.error import HTTPError
 from vhf.logging.log import logger
-from vhf.models.portfolio import Portfolio, PortfolioList, PortfolioRequest, PortfolioSelector, PortfolioSelectorRequest
+from vhf.models.portfolio import Portfolio, PortfolioList, \
+    PortfolioSelectorRequest, PortfolioWeights, PortfolioCreationRequest, PortfolioRequest, PortfolioID
 
 router = APIRouter()
 
 @router.post("/select-pool")
-async def select_pool(pool : PortfolioRequest) -> int:
+async def select_pool(pool : PortfolioCreationRequest) -> int:
     """
     Selects Strategy pool from all strategies
     :param pool:
@@ -29,11 +30,11 @@ async def select_pool(poolName : str, prompt : str | None = None) -> int:
     :param poolName:
     :return: Portfolio ID
     """
-    pool = PortfolioRequest(portfolio_name=poolName, strategies = selectStrat(prompt))
+    pool = PortfolioCreationRequest(portfolio_name=poolName, strategies = selectStrat(prompt))
     return set_db_pool(pool)
 
 @router.post("/ai-select-portfolio")
-async def select_portfolio(portfolioID : int) -> int:
+async def select_portfolio(pid: PortfolioID) -> List[str]:
     """
     Update portfolio using selector
     :param portfolioID:
@@ -41,23 +42,25 @@ async def select_portfolio(portfolioID : int) -> int:
     :return:
     """
 
-    selector,k = selectSelector(portfolioID)
-    strategies = selectorStrat(get_sids(portfolioID),selector,k)
-    update_portfolio_strats(portfolioID=portfolioID,strats=strategies)
+    selector,k = selectSelector(pid.portfolio_id)
+    strategies = selectorStrat(get_sids(pid.portfolio_id),selector,k)
+    update_portfolio_strats(portfolioID=pid.portfolio_id,strats=strategies)
+    return strategies
 
 @router.post("/select-portfolio")
-async def select_portfolio(portfolioReq : PortfolioSelectorRequest) -> None:
+async def select_portfolio(portfolioReq : PortfolioSelectorRequest) -> List[str]:
     """
     Update portfolio using selector
     :param portfolioID:
     :param selector:
     :return:
     """
-    strategies = selectorStrat(get_sids(portfolioReq.portfolioID),portfolioReq.selector,portfolioReq.k)
-    update_portfolio_strats(portfolioID=portfolioReq.portfolioID,strats=strategies)
+    strategies = selectorStrat(get_sids(portfolioReq.portfolio_id),portfolioReq.selector,portfolioReq.k)
+    update_portfolio_strats(portfolioID=portfolioReq.portfolio_id,strats=strategies)
+    return strategies
 
 @router.post("/choose-portfolio")
-async def choose_portfolio(portfolioID : int, strategies : List[str]) -> None:
+async def choose_portfolio(portfolio : PortfolioRequest) -> None:
     """
     Manually select portfolio from portfolio Pool.
     Updates given portfolio.
@@ -65,10 +68,10 @@ async def choose_portfolio(portfolioID : int, strategies : List[str]) -> None:
     :param portfolioID: portfolio ID
     :return:
     """
-    update_portfolio_strats(portfolioID=portfolioID,strats=strategies)
+    update_portfolio_strats(portfolioID=portfolio.portfolio_id,strats=portfolio.strategies)
 
 @router.post("/seed-portfolio")
-async def seed_portfolio(portfolioID : int, weights : List[int]) -> None:
+async def seed_portfolio(portfolioWeights : PortfolioWeights) -> None:
     """
     seed portfolio with weights.
     If this function is not called AI autoseeds portfolio.
@@ -76,9 +79,9 @@ async def seed_portfolio(portfolioID : int, weights : List[int]) -> None:
     :param weights:
     :return:
     """
-    total = sum(weights)
-    weights = [x/total for x in weights]
-    update_portfolio_weights(portfolioID, weights)
+    total = sum(portfolioWeights.weights)
+    weights = [x/total for x in portfolioWeights.weights]
+    update_portfolio_weights(portfolioWeights.portfolio_id, weights)
 
 @router.get("/portfolios")
 async def get_portfolios(rankBy : str,limit:int|None = None) -> PortfolioList:

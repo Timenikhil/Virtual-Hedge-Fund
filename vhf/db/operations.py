@@ -4,7 +4,7 @@ from typing import List
 from fastapi import HTTPException
 
 from vhf.db import connection
-from vhf.models.portfolio import PortfolioRequest, Portfolio, PortfolioList
+from vhf.models.portfolio import Portfolio, PortfolioList, PortfolioCreationRequest
 
 
 def serialize_weights(weights) -> str:
@@ -19,7 +19,7 @@ def deserialize_strategies(strategies) -> list[str]:
     return strategies.split(",")
 
 
-def set_db_pool(pool: PortfolioRequest) -> int:
+def set_db_pool(pool: PortfolioCreationRequest) -> int:
     """
 
     Store the given Portfolio in the database and return the portfolio id
