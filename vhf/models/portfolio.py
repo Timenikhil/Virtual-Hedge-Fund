@@ -11,10 +11,6 @@ class Portfolio(BaseModel):
     strategies: List[str] # ids of strategies
     live : bool = False
 
-class PortfolioRequest(BaseModel):
-    portfolio_name: str
-    strategies: List[str] # ids of strategies
-
 class PortfolioList(BaseModel):
     portfolios: List[Portfolio]
 
@@ -22,3 +18,12 @@ class PortfolioSelector(str,Enum):
     topk = "topk"
     bottomk = "bottomk"
     ai = "ai"  # allows ai to choose selection strategy
+
+class PortfolioRequest(BaseModel):
+    portfolio_name: str
+    strategies: List[str] # ids of strategies
+
+class PortfolioSelectorRequest(BaseModel) :
+    portfolioID : int
+    selector : PortfolioSelector | None = None,
+    k:int = 10

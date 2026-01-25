@@ -176,4 +176,4 @@ def get_sids(pid: int) -> List[str]:
         record = cursor.fetchone()
         if not record:
             raise HTTPException(status_code=404, detail="Portfolio not found")
-        return deserialize_strategies(record)
+        return deserialize_strategies(record[0])
