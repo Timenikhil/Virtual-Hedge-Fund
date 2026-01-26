@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { ArrowLeft, TrendingUp, TrendingDown } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid, Legend } from 'recharts';
+import {portfolioAPI} from "@/lib/api";
 
 interface Strategy {
     id: string;
@@ -38,30 +39,8 @@ export default function PortfolioDetailPage() {
 
     const fetchPortfolioDetails = async () => {
         try {
-            // TODO: Replace with actual API call
-            // const data = await portfolioAPI.getPortfolioDetails(params.id as string);
-
-            // Mock data
-            setPortfolio({
-                id: parseInt(params.id as string),
-                name: 'Momentum Portfolio',
-                total_return: 12.5,
-                strategies: [
-                    { id: 'strat-1', name: 'Momentum Strategy', weight: 35 },
-                    { id: 'strat-2', name: 'Mean Reversion', weight: 25 },
-                    { id: 'strat-3', name: 'Value Investing', weight: 20 },
-                    { id: 'strat-4', name: 'Market Making', weight: 12 },
-                    { id: 'strat-5', name: 'Pairs Trading', weight: 8 },
-                ],
-                performance: [
-                    { date: '2025-01-01', portfolio: 0, strategy1: 0, strategy2: 0, strategy3: 0 },
-                    { date: '2025-01-05', portfolio: 2.3, strategy1: 3.1, strategy2: 1.8, strategy3: 2.0 },
-                    { date: '2025-01-10', portfolio: 4.8, strategy1: 5.2, strategy2: 3.5, strategy3: 4.1 },
-                    { date: '2025-01-15', portfolio: 7.2, strategy1: 8.5, strategy2: 5.1, strategy3: 6.8 },
-                    { date: '2025-01-20', portfolio: 9.8, strategy1: 11.2, strategy2: 7.3, strategy3: 9.1 },
-                    { date: '2025-01-25', portfolio: 12.5, strategy1: 14.8, strategy2: 9.2, strategy3: 11.5 },
-                ]
-            });
+            const data = await portfolioAPI.getPortfolioDetails(params.id as string);
+            setPortfolio(data);
             setLoading(false);
         } catch (error) {
             console.error('Error fetching portfolio details:', error);

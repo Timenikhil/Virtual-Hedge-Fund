@@ -8,16 +8,18 @@ import { StepCard } from '@/components/StepCard';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import {useRouter} from "next/navigation";
 
-const INITIAL_STRATEGIES: Strategy[] = [
-    { id: 'strat-1', name: 'Momentum Strategy', description: 'Trend-following based on price momentum', category: 'Trend' },
-    { id: 'strat-2', name: 'Mean Reversion', description: 'Statistical arbitrage on price reversals', category: 'Statistical' },
-    { id: 'strat-3', name: 'Value Investing', description: 'Fundamental analysis based approach', category: 'Fundamental' },
-    { id: 'strat-4', name: 'Market Making', description: 'Spread capture and liquidity provision', category: 'Arbitrage' },
-    { id: 'strat-5', name: 'Pairs Trading', description: 'Correlated asset arbitrage', category: 'Statistical' },
-    { id: 'strat-6', name: 'Options Strategy', description: 'Volatility and delta-neutral strategies', category: 'Derivatives' },
-    { id: 'strat-7', name: 'Machine Learning', description: 'AI-driven predictive models', category: 'Quantitative' },
-    { id: 'strat-8', name: 'Risk Parity', description: 'Equal risk contribution allocation', category: 'Risk-Based' },
-];
+// const INITIAL_STRATEGIES: Strategy[] = [
+//     { id: 'strat-1', name: 'Momentum Strategy', description: 'Trend-following based on price momentum', category: 'Trend' },
+//     { id: 'strat-2', name: 'Mean Reversion', description: 'Statistical arbitrage on price reversals', category: 'Statistical' },
+//     { id: 'strat-3', name: 'Value Investing', description: 'Fundamental analysis based approach', category: 'Fundamental' },
+//     { id: 'strat-4', name: 'Market Making', description: 'Spread capture and liquidity provision', category: 'Arbitrage' },
+//     { id: 'strat-5', name: 'Pairs Trading', description: 'Correlated asset arbitrage', category: 'Statistical' },
+//     { id: 'strat-6', name: 'Options Strategy', description: 'Volatility and delta-neutral strategies', category: 'Derivatives' },
+//     { id: 'strat-7', name: 'Machine Learning', description: 'AI-driven predictive models', category: 'Quantitative' },
+//     { id: 'strat-8', name: 'Risk Parity', description: 'Equal risk contribution allocation', category: 'Risk-Based' },
+// ];
+
+const INITIAL_STRATEGIES = await portfolioAPI.getStrategies();
 
 export default function PortfolioManagement() {
     const router = useRouter();
@@ -81,7 +83,7 @@ export default function PortfolioManagement() {
             } else {
                 strats = await portfolioAPI.aiSelectPortfolio(portfolioId);
             }
-            setStrategies(strategies.filter(s => strats.includes(s.id)));
+            setStrategies(strategies.filter(s => strats.includes(s.strategy_id)));
             setSelectedStrategies([]); // Reset selections for Step 3
             handleStepComplete(2);
         } catch (error) {
@@ -293,7 +295,7 @@ export default function PortfolioManagement() {
                     >
                         <div className="mt-4 space-y-3">
                             {selectedStrategies.map((strategyId, idx) => {
-                                const strategy = strategies.find(s => s.id === strategyId);
+                                const strategy = strategies.find(s => s.strategy_id === strategyId);
                                 return (
                                     <div key={strategyId} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
                                         <span className="w-40 text-sm font-medium">{strategy?.name}</span>

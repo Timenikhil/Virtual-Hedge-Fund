@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { Check, X } from 'lucide-react';
 
 export interface Strategy {
-    id: string;
+    strategy_id: string;
     name: string;
     description: string;
     category: string;
@@ -64,7 +64,7 @@ export const StrategySelector: React.FC<StrategySelectorProps> = ({
             Selected ({selectedStrategies.length}):
           </span>
                     {selectedStrategies.map(stratId => {
-                        const strategy = strategies.find(s => s.id === stratId);
+                        const strategy = strategies.find(s => s.strategy_id === stratId);
                         return (
                             <span
                                 key={stratId}
@@ -86,11 +86,11 @@ export const StrategySelector: React.FC<StrategySelectorProps> = ({
             {/* Strategy Cards Grid */}
             <div className="grid grid-cols-2 gap-3 max-h-96 overflow-y-auto">
                 {filteredStrategies.map((strategy) => {
-                    const isSelected = selectedStrategies.includes(strategy.id);
+                    const isSelected = selectedStrategies.includes(strategy.strategy_id);
                     return (
                         <div
-                            key={strategy.id}
-                            onClick={() => onToggleStrategy(strategy.id)}
+                            key={strategy.strategy_id}
+                            onClick={() => onToggleStrategy(strategy.strategy_id)}
                             className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
                                 isSelected
                                     ? 'border-blue-500 bg-blue-50 shadow-md'

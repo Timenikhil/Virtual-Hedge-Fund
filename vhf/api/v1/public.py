@@ -1,3 +1,4 @@
+import datetime
 from typing import List
 
 from fastapi import APIRouter, Path, HTTPException
@@ -5,11 +6,12 @@ from fastapi import APIRouter, Path, HTTPException
 from vhf.ai.ai_selectors import selectStrat, selectSelector
 from vhf.ai.selectors import selectorStrat
 from vhf.db.operations import set_db_pool, get_db_portfolio, update_portfolio_weights, update_portfolio_strats, \
-    get_ranked_list, get_sids
+    get_ranked_list, get_sids, get_db_portfolio_id, get_ranked_strat_list, get_db_strat
 from vhf.models.error import HTTPError
 from vhf.logging.log import logger
 from vhf.models.portfolio import Portfolio, PortfolioList, \
     PortfolioSelectorRequest, PortfolioWeights, PortfolioCreationRequest, PortfolioRequest, PortfolioID
+from vhf.models.strategy import StrategyID, StrategyPrice, StrategyList
 
 router = APIRouter()
 
@@ -21,7 +23,7 @@ async def select_pool(pool : PortfolioCreationRequest) -> int:
     :return: Portfolio ID
     """
     print("here")
-    return set_db_pool(pool)
+    return set_db_pool(pool,datetime.datetime.today().isoformat())
 
 @router.post("/ai-select-pool")
 async def select_pool(poolName : str, prompt : str | None = None) -> int:
@@ -31,7 +33,7 @@ async def select_pool(poolName : str, prompt : str | None = None) -> int:
     :return: Portfolio ID
     """
     pool = PortfolioCreationRequest(portfolio_name=poolName, strategies = selectStrat(prompt))
-    return set_db_pool(pool)
+    return set_db_pool(pool,datetime.datetime.today().isoformat())
 
 @router.post("/ai-select-portfolio")
 async def select_portfolio(pid: PortfolioID) -> List[str]:
@@ -84,7 +86,7 @@ async def seed_portfolio(portfolioWeights : PortfolioWeights) -> None:
     update_portfolio_weights(portfolioWeights.portfolio_id, weights)
 
 @router.get("/portfolios")
-async def get_portfolios(rankBy : str,limit:int|None = None) -> PortfolioList:
+async def get_portfolios(rankBy : str|None = None,limit:int|None = None) -> PortfolioList:
     """
     Returns a list of portfolios ranked by rankBy.
     :param limit: max number of portfolios to return
@@ -101,3 +103,34 @@ async def get_portfolio(portfolioName : str) -> Portfolio:
     :return:
     """
     return get_db_portfolio(portfolioName)
+
+@router.post("/portfolio_id")
+async def get_portfolio(portfolio_id : PortfolioID) -> Portfolio:
+    """
+    Returns a portfolio with given id under current user
+    :param portfolio:
+    :return:
+    """
+    return get_db_portfolio_id(portfolio_id.portfolio_id)
+
+@router.get("/strategies")
+async def get_strategies(rankBy : str|None = None,limit:int|None = None) -> StrategyList:
+    """
+    Returns a list of strategies ranked by rankBy.
+    :param limit: max number of portfolios to return
+    :param rankBy:
+    :return:
+    """
+    return get_ranked_strat_list(rankBy,limit)
+
+@router.post("/strategy")
+async def get_strategy(strategy : StrategyID) -> StrategyPrice:
+    """
+    Returns a strategy with given ID under current user
+    :param strategy:
+    :return:
+    """
+    return get_db_strat(strategy.strategy_id)
+
+
+

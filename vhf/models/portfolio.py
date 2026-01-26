@@ -3,13 +3,15 @@ from typing import List
 
 from pydantic import BaseModel
 
-
-class Portfolio(BaseModel):
+class PortfolioID(BaseModel):
     portfolio_id: int
+
+class Portfolio(PortfolioID):
     portfolio_name: str
     weights: List[float] | None = None
     strategies: List[str] # ids of strategies
     live : bool = False
+    date : str | None = None
 
 class PortfolioList(BaseModel):
     portfolios: List[Portfolio]
@@ -22,9 +24,6 @@ class PortfolioSelector(str,Enum):
 class PortfolioCreationRequest(BaseModel):
     portfolio_name: str
     strategies: List[str] # ids of strategies
-
-class PortfolioID(BaseModel):
-    portfolio_id: int
 
 class PortfolioRequest(PortfolioID):
     strategies: List[str] # ids of strategies

@@ -13,7 +13,20 @@ def initialiseDB():
                         PNAME TEXT NOT NULL,
                         WEIGHTS TEXT,
                         SIDS TEXT NOT NULL,
-                        LIVE INTEGER NOT NULL )"""
+                        DATE TEXT NOT NULL,
+                        LIVE INTEGER NOT NULL);""")
+        cursor.execute("""
+                        CREATE TABLE IF NOT EXISTS strategies (SID TEXT PRIMARY KEY,
+                        NAME TEXT NOT NULL,
+                        DESCRIPTION TEXT NOT NULL,
+                        CATEGORY TEXT NOT NULL,
+                        P0 INTEGER NOT NULL,
+                        P1 INTEGER NOT NULL,
+                        P2 INTEGER NOT NULL,
+                        P3 INTEGER NOT NULL,
+                        P4 INTEGER NOT NULL,
+                        P5 INTEGER NOT NULL);
+                        """
         )
         connection.client.commit()
         connection.client.sync()
