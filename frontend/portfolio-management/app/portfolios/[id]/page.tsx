@@ -6,6 +6,7 @@ import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { ArrowLeft, TrendingUp, TrendingDown } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid, Legend } from 'recharts';
 import {portfolioAPI} from "@/lib/api";
+import StrategyWeightEditor from "@/components/StrategyWeightEditor";
 
 interface Strategy {
     id: string;
@@ -139,24 +140,14 @@ export default function PortfolioDetailPage() {
                             </ResponsiveContainer>
                         </div>
 
-                        {/* Strategy List */}
-                        <div className="bg-white rounded-lg border p-6">
-                            <h2 className="text-xl font-semibold mb-4">Strategies</h2>
-                            <div className="space-y-3">
-                                {portfolio.strategies.map((strategy, index) => (
-                                    <div key={strategy.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                                        <div className="flex items-center gap-3">
-                                            <div
-                                                className="w-4 h-4 rounded"
-                                                style={{ backgroundColor: COLORS[index % COLORS.length] }}
-                                            />
-                                            <span className="font-medium">{strategy.name}</span>
-                                        </div>
-                                        <span className="text-lg font-semibold">{strategy.weight}%</span>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
+                        <StrategyWeightEditor
+                            portfolioId={portfolio.id}
+                            strategies={portfolio.strategies}
+                            colors={COLORS}
+                            onWeightsUpdated={() => {
+                                window.location.reload();
+                            }}
+                        />
                     </div>
 
                     {/* Performance Chart */}
