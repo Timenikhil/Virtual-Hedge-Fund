@@ -1,0 +1,22 @@
+services:
+  vhf-api:
+    build: .
+    container_name: vhf-api
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      # App-local data (DB, logs, etc.)
+      - ./volumes/appdata:/app/data
+      - ./logs:/app/logs
+      # Shared QuantRocket codeload mount (defaults to in-repo QuantRocket bind mount).
+      - ${QUANTROCKET_CODELOAD_HOST_PATH:-./quantrocket/volumes/codeload}:/codeload
+      # Optional: allow this container to exec into QuantRocket containers.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      # Where your QuantRocket docker-compose file lives (for exec commands).
+      QUANTROCKET_COMPOSE_DIR: ${QUANTROCKET_COMPOSE_DIR:-.}
+      LOG_FILE_PATH: ${LOG_FILE_PATH:-/app/logs/app.log}
+    command: uvicorn vhf.main:app --host 0.0.0.0 --port 8000 --reload
+    restart: unless-stopped
