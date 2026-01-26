@@ -105,9 +105,14 @@ export default function PortfolioManagement() {
         if (!portfolioId) return;
         try {
             if (workflowMode !== 'manual') {
-                setWeights(weights => [...weights].fill(1) )
+
+                const final = selectedStrategies.map(() => 1);
+                setWeights(final);
+                await portfolioAPI.seedPortfolio(portfolioId, final);
             }
-            await portfolioAPI.seedPortfolio(portfolioId, weights);
+            else {
+                await portfolioAPI.seedPortfolio(portfolioId, weights);
+            }
             handleStepComplete(4);
         } catch (error) {
             console.error('Error in Step 4:', error);
@@ -297,7 +302,8 @@ export default function PortfolioManagement() {
                         onStepClick={handleStepClick}
                     >
                         <div className="mt-4 space-y-3">
-                            {selectedStrategies.map((strategyId, idx) => {
+
+                            {workflowMode==='manual' && selectedStrategies.map((strategyId, idx) => {
                                 const strategy = strategies.find(s => s.strategy_id === strategyId);
                                 return (
                                     <div key={strategyId} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
@@ -317,6 +323,7 @@ export default function PortfolioManagement() {
                                     </div>
                                 );
                             })}
+
                             <button
                                 onClick={handleStep4Submit}
                                 disabled={!portfolioId}
