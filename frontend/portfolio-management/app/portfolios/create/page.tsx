@@ -104,6 +104,9 @@ export default function PortfolioManagement() {
     const handleStep4Submit = async () => {
         if (!portfolioId) return;
         try {
+            if (workflowMode !== 'manual') {
+                setWeights(weights => [...weights].fill(1) )
+            }
             await portfolioAPI.seedPortfolio(portfolioId, weights);
             handleStepComplete(4);
         } catch (error) {
