@@ -7,6 +7,8 @@ from fastapi import HTTPException
 from vhf.db import connection
 from vhf.models.portfolio import Portfolio, PortfolioList, PortfolioCreationRequest
 from vhf.models.strategy import StrategyList, Strategy, StrategyPrice
+from vhf.quantrocket.allocations import AllocationError, update_account_allocations
+from vhf.logging.log import logger
 
 
 def serialize_weights(weights) -> str:
@@ -21,7 +23,71 @@ def deserialize_strategies(strategies) -> list[str]:
     return strategies.split(",")
 
 
-def set_db_pool(pool: PortfolioCreationRequest,date : str) -> int:
+def _get_portfolio_account(portfolioID: int) -> str | None:
+    connection.connect()
+    connection.client.sync()
+    with closing(connection.client.cursor()) as cursor:
+        cursor.execute(
+            """
+            SELECT ACCOUNT FROM portfolio_accounts WHERE PID = ?
+            """,
+            (portfolioID,),
+        )
+        record = cursor.fetchone()
+        return record[0] if record else None
+
+
+def set_portfolio_account(portfolioID: int, account: str) -> None:
+    """
+    Map a portfolio to a QuantRocket account (1:1).
+    """
+    connection.connect()
+    connection.client.sync()
+    with closing(connection.client.cursor()) as cursor:
+        cursor.execute(
+            """
+            INSERT INTO portfolio_accounts (PID, ACCOUNT)
+            VALUES (?, ?)
+            ON CONFLICT(PID) DO UPDATE SET ACCOUNT=excluded.ACCOUNT
+            """,
+            (portfolioID, account),
+        )
+        connection.client.commit()
+        connection.client.sync()
+
+
+def _sync_allocations_from_db(portfolioID: int) -> None:
+    """
+    Sync the given portfolio's strategies/weights to QuantRocket allocations
+    based on the mapped account. No-op if no mapping exists.
+    """
+    account = _get_portfolio_account(portfolioID)
+    if not account:
+        logger.info(
+            "No account mapped to portfolio %s; skipping allocation sync", portfolioID
+        )
+        return
+
+    portfolio = get_db_portfolio_id(portfolioID)
+    logger.info(
+        "Syncing allocations for portfolio %s to account %s",
+        portfolioID,
+        account,
+    )
+    # Align lengths; if mismatch, truncate to shortest.
+    codes = portfolio.strategies
+    weights = portfolio.weights
+    if len(codes) != len(weights):
+        min_len = min(len(codes), len(weights))
+        codes = codes[:min_len]
+        weights = weights[:min_len]
+    try:
+        update_account_allocations(account, codes, weights)
+    except AllocationError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+def set_db_pool(pool: PortfolioCreationRequest, date: str) -> int:
     """
 
     Store the given Portfolio in the database and return the portfolio id
@@ -38,9 +104,11 @@ def set_db_pool(pool: PortfolioCreationRequest,date : str) -> int:
                        VALUES (?,?,0,?)""",
             (pool.portfolio_name, serialize_weights(pool.strategies), date),
         )
+        pid = cursor.lastrowid
         connection.client.commit()
         connection.client.sync()
-        return cursor.lastrowid
+    set_portfolio_account(pid, pool.account)
+    return pid
 
 
 def update_portfolio_strats(portfolioID: int, strats: List[str]) -> None:
@@ -63,6 +131,7 @@ def update_portfolio_strats(portfolioID: int, strats: List[str]) -> None:
         )
         connection.client.commit()
         connection.client.sync()
+    _sync_allocations_from_db(portfolioID)
 
 
 def update_portfolio_weights(portfolioID: int, weights: List[float]) -> None:
@@ -85,6 +154,7 @@ def update_portfolio_weights(portfolioID: int, weights: List[float]) -> None:
         )
         connection.client.commit()
         connection.client.sync()
+    _sync_allocations_from_db(portfolioID)
 
 
 def get_db_portfolio(name: str) -> Portfolio:
@@ -116,6 +186,7 @@ def get_db_portfolio(name: str) -> Portfolio:
             live=bool(int(record[4])),
         )
 
+
 def get_db_portfolio_id(pid: int) -> Portfolio:
     """
 
@@ -145,6 +216,7 @@ def get_db_portfolio_id(pid: int) -> Portfolio:
             live=bool(int(record[4])),
         )
 
+
 def get_db_strat(sid: str) -> StrategyPrice:
     """
 
@@ -168,10 +240,12 @@ def get_db_strat(sid: str) -> StrategyPrice:
             raise HTTPException(status_code=404, detail="Strategy not found")
         return StrategyPrice(
             strategy_id=record[0],
-            name= record[1],
-            description= record[2],
+            name=record[1],
+            description=record[2],
             category=record[3],
-            prices=[record[4], record[5], record[6], record[7], record[8], record[9]],)
+            prices=[record[4], record[5], record[6], record[7], record[8], record[9]],
+        )
+
 
 def get_ranked_list(rankBy: str, limit: int | None) -> PortfolioList:
     """
@@ -209,9 +283,10 @@ def get_ranked_list(rankBy: str, limit: int | None) -> PortfolioList:
             weights=deserialize_weights(row[2]),
             strategies=deserialize_strategies(row[3]),
             live=bool(int(row[4])),
-            date=row[5]
+            date=row[5],
         )
         return PortfolioList(portfolios=list(map(mapper, record)))
+
 
 def get_ranked_strat_list(rankBy: str, limit: int | None) -> StrategyList:
     """
@@ -244,11 +319,10 @@ def get_ranked_strat_list(rankBy: str, limit: int | None) -> StrategyList:
         if not record:
             return StrategyList(strategies=[])
         mapper = lambda row: Strategy(
-            strategy_id=row[0],
-            name=row[1],
-            description=row[2],
-            category=row[3])
+            strategy_id=row[0], name=row[1], description=row[2], category=row[3]
+        )
         return StrategyList(strategies=list(map(mapper, record)))
+
 
 def get_sids(pid: int) -> List[str]:
     """

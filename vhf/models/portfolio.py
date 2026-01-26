@@ -23,6 +23,7 @@ class PortfolioSelector(str,Enum):
 
 class PortfolioCreationRequest(BaseModel):
     portfolio_name: str
+    account: str
     strategies: List[str] # ids of strategies
 
 class PortfolioRequest(PortfolioID):

@@ -12,11 +12,18 @@ from vhf.logging.log import logger
 from vhf.models.portfolio import Portfolio, PortfolioList, \
     PortfolioSelectorRequest, PortfolioWeights, PortfolioCreationRequest, PortfolioRequest, PortfolioID
 from vhf.models.strategy import StrategyID, StrategyPrice, StrategyList
+from pydantic import BaseModel
 
 router = APIRouter()
 
+
+class AiPortfolioCreationRequest(BaseModel):
+    portfolio_name: str
+    account: str
+    prompt: str | None = None
+
 @router.post("/select-pool")
-async def select_pool(pool : PortfolioCreationRequest) -> int:
+async def select_pool(pool: PortfolioCreationRequest) -> int:
     """
     Selects Strategy pool from all strategies
     :param pool:
@@ -26,14 +33,18 @@ async def select_pool(pool : PortfolioCreationRequest) -> int:
     return set_db_pool(pool,datetime.datetime.today().isoformat())
 
 @router.post("/ai-select-pool")
-async def select_pool(poolName : str, prompt : str | None = None) -> int:
+async def ai_select_pool(req: AiPortfolioCreationRequest) -> int:
     """
     Selects Strategy pool from all strategies
     :param poolName:
     :return: Portfolio ID
     """
-    pool = PortfolioCreationRequest(portfolio_name=poolName, strategies = selectStrat(prompt))
-    return set_db_pool(pool,datetime.datetime.today().isoformat())
+    pool = PortfolioCreationRequest(
+        portfolio_name=req.portfolio_name,
+        account=req.account,
+        strategies=selectStrat(req.prompt),
+    )
+    return set_db_pool(pool, datetime.datetime.today().isoformat())
 
 @router.post("/ai-select-portfolio")
 async def select_portfolio(pid: PortfolioID) -> List[str]:
@@ -131,6 +142,4 @@ async def get_strategy(strategy : StrategyID) -> StrategyPrice:
     :return:
     """
     return get_db_strat(strategy.strategy_id)
-
-
 

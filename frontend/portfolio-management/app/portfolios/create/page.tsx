@@ -26,6 +26,7 @@ export default function PortfolioManagement() {
     const [workflowMode, setWorkflowMode] = useState<'manual' | 'automatic'>('manual');
     const [currentStep, setCurrentStep] = useState(1);
     const [portfolioName, setPortfolioName] = useState('');
+    const [accountName, setAccountName] = useState('');
     const [portfolioId, setPortfolioId] = useState<number | null>(null);
     const [strategies, setStrategies] = useState<Strategy[]>(INITIAL_STRATEGIES);
     const [selectedStrategies, setSelectedStrategies] = useState<string[]>([]);
@@ -62,10 +63,11 @@ export default function PortfolioManagement() {
             if (workflowMode === 'manual') {
                 id = await portfolioAPI.selectPool({
                     portfolio_name: portfolioName,
+                    account: accountName,
                     strategies: selectedStrategies
                 });
             } else {
-                id = await portfolioAPI.aiSelectPool(portfolioName, aiPrompt);
+                id = await portfolioAPI.aiSelectPool(portfolioName, accountName, aiPrompt);
             }
             setPortfolioId(id);
             handleStepComplete(1);
@@ -188,6 +190,13 @@ export default function PortfolioManagement() {
                                 onChange={(e) => setPortfolioName(e.target.value)}
                                 className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                             />
+                            <input
+                                type="text"
+                                placeholder="QuantRocket Account (e.g., DU12345)"
+                                value={accountName}
+                                onChange={(e) => setAccountName(e.target.value)}
+                                className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
 
                             {workflowMode === 'automatic' ? (
                                 <textarea
@@ -207,7 +216,7 @@ export default function PortfolioManagement() {
 
                             <button
                                 onClick={handleStep1Submit}
-                                disabled={!portfolioName || (workflowMode === 'manual' && selectedStrategies.length === 0)}
+                                disabled={!portfolioName || !accountName || (workflowMode === 'manual' && selectedStrategies.length === 0)}
                                 className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                             >
                                 <Play className="w-4 h-4" />
