@@ -27,7 +27,7 @@ app.include_router(v1.router,
                    prefix="/api/v1",
                      tags=["v1"])
 
-origins = ["http://localhost"]
+origins = ["http://localhost:3000"]
 
 app.add_middleware(
     CORSMiddleware,

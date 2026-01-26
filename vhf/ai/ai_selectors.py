@@ -6,5 +6,5 @@ from vhf.models.portfolio import PortfolioSelector
 def selectStrat(prompt) -> List[str]:
     return []
 
-def selectSelector(portfolioID) -> PortfolioSelector:
-    return "topk"
+def selectSelector(portfolioID) :
+    return [PortfolioSelector("topk"),10]
