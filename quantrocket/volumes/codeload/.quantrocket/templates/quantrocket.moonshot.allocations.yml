@@ -1,0 +1,15 @@
+# quantrocket.moonshot.allocations.yml
+#
+# This file defines the percentage of total capital (Net Liquidation Value)
+# to allocate to Moonshot strategies.
+#
+# Usage guide: http://qrok.it/p/moonshot-allocations
+
+# each top level key is an account number
+DU12345:
+    # each second-level key-value is a strategy code and the percentage
+    # of Net Liquidation Value to allocate
+    dma-tech: 0.75  # allocate 75% of DU12345's Net Liquidation Value to dma-tech
+    dma-etf: 0.5 # allocate 50% of DU12345's Net Liquidation Value to dma-etf
+U12345:
+    dma-tech: 1 # allocate 100% of U12345's Net Liquidation Value to dma-tech

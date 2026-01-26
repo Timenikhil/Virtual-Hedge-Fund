@@ -1,0 +1,25 @@
+# quantrocket.ibg.permissions.yml
+#
+# This file defines market data permissions for IB Gateway. It is only needed
+# if you are running multiple IB Gateways.
+#
+# Usage guide: http://qrok.it/p/ibgpermission
+#
+# each top-level key is the name of an IB Gateway service
+ibg1:
+    # list the exchanges, by security type, this gateway has permission for
+    marketdata:
+        STK:
+            - NYSE
+            - ISLAND
+            - TSEJ
+        FUT:
+            - CME
+            - OSE
+        CASH:
+            - IDEALPRO
+# Include a separate section for each IB Gateway service
+ibg2:
+    marketdata:
+        STK:
+            - NYSE

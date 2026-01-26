@@ -1,0 +1,13 @@
+# quantrocket.zipline.allocations.yml
+#
+# This file defines the starting capital to allocate to Zipline strategies.
+#
+# Usage guide: http://qrok.it/p/zipline-allocations
+
+# each top level key is an account number
+DU12345:
+    # each second-level key-value is a strategy code and the starting capital
+    dma: '100000 USD'  # allocate $100K USD starting capital to dma
+    dma-etf: '20000 USD' # allocate $200K USD starting capital to dma-etf
+U12345:
+    dma: '500000 USD' # allocate $500K USD starting capital to dma
