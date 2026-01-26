@@ -4,6 +4,7 @@ const API_BASE_URL = 'http://localhost:8000/api/v1';
 
 export interface PortfolioRequest {
     portfolio_name: string;
+    account: string;
     strategies: string[];
 }
 
@@ -185,11 +186,11 @@ export const portfolioAPI = {
         return await response.json();
     },
 
-    aiSelectPool: async (poolName: string, prompt?: string): Promise<number> => {
+    aiSelectPool: async (poolName: string, account: string, prompt?: string): Promise<number> => {
         const response = await fetch(`${API_BASE_URL}/ai-select-pool`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ poolName, prompt: prompt || null })
+            body: JSON.stringify({ portfolio_name: poolName, account, prompt: prompt || null })
         });
         if (!response.ok) throw new Error('Failed to AI select pool');
         return await response.json();

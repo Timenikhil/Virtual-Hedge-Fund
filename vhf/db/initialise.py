@@ -14,8 +14,10 @@ def initialiseDB():
                         WEIGHTS TEXT,
                         SIDS TEXT NOT NULL,
                         DATE TEXT NOT NULL,
-                        LIVE INTEGER NOT NULL);""")
-        cursor.execute("""
+                        LIVE INTEGER NOT NULL);"""
+        )
+        cursor.execute(
+            """
                         CREATE TABLE IF NOT EXISTS strategies (SID TEXT PRIMARY KEY,
                         NAME TEXT NOT NULL,
                         DESCRIPTION TEXT NOT NULL,
@@ -27,6 +29,14 @@ def initialiseDB():
                         P4 INTEGER NOT NULL,
                         P5 INTEGER NOT NULL);
                         """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS portfolio_accounts (PID INTEGER PRIMARY KEY,
+                ACCOUNT TEXT NOT NULL,
+                UNIQUE(ACCOUNT)
+            );
+            """
         )
         connection.client.commit()
         connection.client.sync()

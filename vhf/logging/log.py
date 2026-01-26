@@ -8,6 +8,8 @@ from dotenv import load_dotenv
 from logging_loki import LokiQueueHandler
 
 load_dotenv()
+# Avoid noisy tracebacks if a logging handler (e.g., Loki) fails to emit.
+logging.raiseExceptions = False
 
 logger = logging.getLogger("vhf")
 logger.setLevel(logging.INFO) # Set the lowest level of logs to be handled
