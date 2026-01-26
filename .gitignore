@@ -6,5 +6,10 @@ __pycache__/
 logs/
 .env
 
+frontend/portfolio-management/node_modules/
+frontend/portfolio-management/.next/
+frontend/portfolio-management/next-env.d.ts
+
+
 # Ignore local database files
 vhf.db*
