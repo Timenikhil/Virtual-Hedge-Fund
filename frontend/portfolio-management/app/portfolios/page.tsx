@@ -8,6 +8,7 @@ import { PortfolioFilters } from '@/components/PortfolioFilters';
 import { PortfolioTable } from '@/components/PortfolioTable';
 import { EmptyPortfolioState } from '@/components/EmptyPortfolioState';
 import { Plus } from 'lucide-react';
+import {portfolioAPI} from "@/lib/api";
 
 interface Portfolio {
     id: number;
@@ -34,25 +35,8 @@ export default function PortfoliosPage() {
 
     const fetchPortfolios = async () => {
         try {
-            // Mock data
-            setPortfolios([
-                {
-                    id: 1,
-                    name: 'Momentum Portfolio',
-                    created_at: '2025-01-20',
-                    strategy_count: 5,
-                    total_value: 125000,
-                    return_percentage: 12.5
-                },
-                {
-                    id: 2,
-                    name: 'Value Strategy Mix',
-                    created_at: '2025-01-15',
-                    strategy_count: 3,
-                    total_value: 85000,
-                    return_percentage: -8.3
-                }
-            ]);
+            const ports = await portfolioAPI.getPortfolios()
+            setPortfolios(ports);
             setLoading(false);
         } catch (error) {
             console.error('Error fetching portfolios:', error);

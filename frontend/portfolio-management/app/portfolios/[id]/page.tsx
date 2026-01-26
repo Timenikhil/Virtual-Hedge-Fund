@@ -191,10 +191,10 @@ export default function PortfolioDetailPage() {
                                     tickFormatter={(date) => new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                                 />
                                 <YAxis
-                                    label={{ value: 'Return (%)', angle: -90, position: 'insideLeft' }}
+                                    label={{ value: 'Value (1K $)', angle: -90, position: 'insideLeft' }}
                                 />
                                 <Tooltip
-                                    formatter={(value: number) => `${value.toFixed(2)}%`}
+                                    formatter={(value: number) => `${value.toFixed(0)} k$`}
                                     labelFormatter={(date) => new Date(date).toLocaleDateString()}
                                 />
                                 <Legend />

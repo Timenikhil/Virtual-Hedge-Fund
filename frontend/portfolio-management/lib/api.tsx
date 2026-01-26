@@ -7,6 +7,17 @@ export interface PortfolioRequest {
     strategies: string[];
 }
 
+export interface Portfolio {
+    id: number;
+    name: string;
+    created_at: string;
+    strategy_count: number;
+    total_value: number;
+    return_percentage: number;
+}
+
+export interface Portfolios extends Array<Portfolio> {}
+
 interface StrategyPrice{ id: string, name: string, weight: number }
 interface PerformancePrice { date: string, portfolio: number, strategy1: number, strategy2: number, strategy3: number }
 export interface PortfolioPrice {
@@ -29,6 +40,62 @@ export const portfolioAPI = {
         return strats.strategies;
     },
 
+    getPortfolios: async(): Promise<Portfolios> => {
+            const response = await fetch(`${API_BASE_URL}/portfolios`, {
+                method: 'GET',
+                headers: { 'Content-Type': 'application/json' }
+            });
+
+            if (!response.ok) throw new Error('Failed to fetch portfolios');
+            const portfolios = (await response.json()).portfolios;
+
+            // Map portfolios to add computed fields
+            return await Promise.all(
+                portfolios.map(async (port: any) => {
+                    const strats = port.strategies;
+                    const weights = port.weights;
+
+                    // Fetch strategy details to get prices
+                    const strategyDetails = await Promise.all(
+                        strats.map((strategy_id: string) =>
+                            fetch(`${API_BASE_URL}/strategy`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({strategy_id})
+                            }).then(res => res.json())
+                        )
+                    );
+
+                    // Calculate current portfolio value (last price point)
+                    const lastIndex = strategyDetails[0]?.prices?.length - 1 || 0;
+                    let total_value = strategyDetails.reduce((sum, strat, index) => {
+                        const price = strat.prices[lastIndex];
+                        const weight = weights[index];
+                        return sum + (price * weight);
+                    }, 0);
+
+                    // Calculate initial portfolio value (first price point)
+                    const initial_value = strategyDetails.reduce((sum, strat, index) => {
+                        const price = strat.prices[0];
+                        const weight = weights[index];
+                        return sum + (price * weight);
+                    }, 0);
+
+                    // Calculate return percentage
+                    const return_percentage = ((total_value - initial_value) / initial_value) * 100;
+                    total_value *= 1000;
+                    return {
+                        id: port.portfolio_id,
+                        name: port.portfolio_name,
+                        created_at: port.date || new Date().toISOString().split('T')[0],
+                        strategy_count: strats.length,
+                        total_value,
+                        return_percentage
+                    };
+                })
+                );
+        },
+
     getPortfolioDetails: async(pid : string): Promise<PortfolioPrice>=> {
         const portfolio_id = parseInt(pid)
         const response = await fetch(`${API_BASE_URL}/portfolio_id`, {
@@ -40,6 +107,7 @@ export const portfolioAPI = {
         const port = await response.json();
         const strats = port.strategies;
         const weights = port.weights;
+
         const strategyDetails = await Promise.all(
             strats.map((strategy_id: string) =>
                 fetch(`${API_BASE_URL}/strategy`, {
@@ -53,24 +121,56 @@ export const portfolioAPI = {
         const formattedStrategies: StrategyPrice[] = strategyDetails.map((strat, index: number) => ({
             id: strat.strategy_id,
             name: strat.name,
-            weight: weights[index]
+            weight: weights[index] * 100
         }));
 
+        const top3Strategies = [...formattedStrategies]
+            .sort((a, b) => b.weight - a.weight)
+            .slice(0, 3);
 
-        //TODO : implement strat price extraction
+        const top3FullDetails = top3Strategies.map(s =>
+            strategyDetails.find(sd => sd.strategy_id === s.id)
+        );
+
+        const numDataPoints = strategyDetails[0]?.prices?.length || 6;
+        const startDate = new Date('2025-01-01');
+        const intervalDays = 5;
+
+        const dates = Array.from({ length: numDataPoints }, (_, i) => {
+            const date = new Date(startDate);
+            date.setDate(date.getDate() + (i * intervalDays));
+            return date.toISOString().split('T')[0];
+        });
+
+        const performance: PerformancePrice[] = dates.map((date, dateIndex) => {
+            // Top 3 strategy values for display
+            const strategy1 = top3FullDetails[0]?.prices[dateIndex] || 0;
+            const strategy2 = top3FullDetails[1]?.prices[dateIndex] || 0;
+            const strategy3 = top3FullDetails[2]?.prices[dateIndex] || 0;
+
+            // Portfolio value: dot product of ALL strategy prices and weights
+            const portfolio = strategyDetails.reduce((sum, strat, index) => {
+                const price = strat.prices[dateIndex]
+                const weight = weights[index]
+                return sum + (price * weight);
+            }, 0);
+
+            return {
+                date,
+                portfolio,
+                strategy1,
+                strategy2,
+                strategy3
+            };
+        });
+
+        const total_return = ((performance[performance.length - 1]?.portfolio - performance[0]?.portfolio)/performance[0]?.portfolio) * 100 || 0;
         return {
             id: portfolio_id,
             name: port.portfolio_name,
-            total_return: 12.5,
+            total_return: total_return,
             strategies: formattedStrategies,
-            performance: [
-            { date: '2025-01-01', portfolio: 0, strategy1: 0, strategy2: 0, strategy3: 0 },
-            { date: '2025-01-05', portfolio: 2.3, strategy1: 3.1, strategy2: 1.8, strategy3: 2.0 },
-            { date: '2025-01-10', portfolio: 4.8, strategy1: 5.2, strategy2: 3.5, strategy3: 4.1 },
-            { date: '2025-01-15', portfolio: 7.2, strategy1: 8.5, strategy2: 5.1, strategy3: 6.8 },
-            { date: '2025-01-20', portfolio: 9.8, strategy1: 11.2, strategy2: 7.3, strategy3: 9.1 },
-            { date: '2025-01-25', portfolio: 12.5, strategy1: 14.8, strategy2: 9.2, strategy3: 11.5 },
-        ]
+            performance: performance
         }
 
     },
