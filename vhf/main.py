@@ -7,16 +7,23 @@ from fastapi.middleware.cors import CORSMiddleware
 from vhf.api.v1 import v1
 from vhf.db.initialise import initialiseDB
 from vhf.logging.log import logger
+from vhf.services.reconcile_scheduler import SCHEDULER_ENABLED, scheduler
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Ensure the database schema exists before serving requests."""
+    """Ensure DB schema exists and lifecycle-manage the reconcile scheduler."""
     try:
         initialiseDB()
     except Exception:
         logger.exception("Database initialisation failed")
         raise
-    yield
+    if SCHEDULER_ENABLED:
+        await scheduler.start()
+    try:
+        yield
+    finally:
+        if SCHEDULER_ENABLED:
+            await scheduler.stop()
 
 
 app = FastAPI(title="Virtual Hedge Fund API",

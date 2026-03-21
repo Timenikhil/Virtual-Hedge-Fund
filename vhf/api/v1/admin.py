@@ -2,6 +2,12 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import Dict, Optional, List
+from vhf.db.operations import (
+    create_reconcile_job,
+    get_reconcile_job,
+    list_reconcile_jobs,
+    set_reconcile_job_enabled,
+)
 from vhf.execution.alpaca_trade_api import (
     trade_strategy_to_alpaca,
     generate_orders_csv,
@@ -17,6 +23,14 @@ from vhf.execution.live_data import (
     get_db,
     RealtimeError,
 )
+from vhf.models.reconcile import (
+    ReconcileJob,
+    ReconcileJobCreateRequest,
+    ReconcileJobEnabledRequest,
+    ReconcileRunResult,
+)
+from vhf.services.reconcile_scheduler import SCHEDULER_ENABLED, scheduler
+from vhf.services.reconcile_service import ReconcileServiceError, run_reconcile_job
 
 
 router = APIRouter()
@@ -27,6 +41,102 @@ class TradeRequest(BaseModel):
     review_date: Optional[str] = "latest"  # or an ISO date
     accounts: Optional[List[str]] = None
     dry_run: bool = False
+
+
+@router.post("/reconcile/jobs", response_model=ReconcileJob)
+def api_create_reconcile_job(req: ReconcileJobCreateRequest):
+    """
+    Create a recurring reconcile job.
+    """
+    if req.interval_seconds <= 0:
+        raise HTTPException(status_code=400, detail="interval_seconds must be > 0")
+    if req.threshold < 0:
+        raise HTTPException(status_code=400, detail="threshold must be >= 0")
+
+    return create_reconcile_job(
+        portfolio_id=req.portfolio_id,
+        interval_seconds=req.interval_seconds,
+        method=req.method,
+        threshold=req.threshold,
+        apply=req.apply,
+        execute_trades=req.execute_trades,
+        dry_run_trades=req.dry_run_trades,
+        review_date=req.review_date,
+        enabled=req.enabled,
+    )
+
+
+@router.get("/reconcile/jobs", response_model=List[ReconcileJob])
+def api_list_reconcile_jobs():
+    """
+    List all reconcile jobs.
+    """
+    return list_reconcile_jobs()
+
+
+@router.get("/reconcile/jobs/{job_id}", response_model=ReconcileJob)
+def api_get_reconcile_job(job_id: int):
+    """
+    Get one reconcile job by id.
+    """
+    return get_reconcile_job(job_id)
+
+
+@router.post("/reconcile/jobs/{job_id}/enabled", response_model=ReconcileJob)
+def api_set_reconcile_job_enabled(job_id: int, req: ReconcileJobEnabledRequest):
+    """
+    Enable or disable a reconcile job.
+    """
+    return set_reconcile_job_enabled(job_id, req.enabled)
+
+
+@router.post("/reconcile/jobs/{job_id}/run", response_model=ReconcileRunResult)
+def api_run_reconcile_job(job_id: int):
+    """
+    Execute a reconcile job immediately.
+    """
+    try:
+        return run_reconcile_job(job_id)
+    except ReconcileServiceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/reconcile/scheduler/run-due", response_model=List[ReconcileRunResult])
+async def api_run_due_reconcile_jobs_once():
+    """
+    Trigger a one-off pass over all due jobs.
+    """
+    return await scheduler.run_due_jobs_once()
+
+
+@router.post("/reconcile/scheduler/start")
+async def api_start_reconcile_scheduler():
+    """
+    Start the in-process scheduler loop.
+    """
+    await scheduler.start()
+    return {"enabled": SCHEDULER_ENABLED, "running": scheduler.is_running}
+
+
+@router.post("/reconcile/scheduler/stop")
+async def api_stop_reconcile_scheduler():
+    """
+    Stop the in-process scheduler loop.
+    """
+    await scheduler.stop()
+    return {"enabled": SCHEDULER_ENABLED, "running": scheduler.is_running}
+
+
+@router.get("/reconcile/scheduler/status")
+def api_reconcile_scheduler_status():
+    """
+    Return scheduler configuration and current runtime status.
+    """
+    return {
+        "enabled_by_config": SCHEDULER_ENABLED,
+        "running": scheduler.is_running,
+        "poll_interval_seconds": scheduler.poll_interval_seconds,
+    }
 
 
 @router.post("/trade")
