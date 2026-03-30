@@ -68,12 +68,17 @@ def _normalize(weights: list[float]) -> list[float]:
 
 
 def _latest_strategy_score(strategy_id: str) -> float:
+    """
+    Score a strategy by its end-to-end price momentum.
+    Returns a value > 0 so that strategies with no history still receive equal weight.
+    Momentum is expressed as (end/start), floored at a small positive value.
+    """
     strategy = get_db_strat(strategy_id)
-    prices = [float(v) for v in strategy.prices if v is not None]
-    if not prices:
-        return 0.0
-    # Keep the first score model simple: use latest available value as the score signal.
-    return max(prices[-1], 0.0)
+    prices = [float(v) for v in strategy.prices if v is not None and math.isfinite(float(v))]
+    if len(prices) < 2 or prices[0] <= 0:
+        return 1.0  # neutral — participates with baseline weight
+    momentum_ratio = prices[-1] / prices[0]
+    return max(momentum_ratio, 0.01)  # floor at 1% to avoid zero/negative weights
 
 
 def _build_strategy_context(strategy_id: str) -> dict[str, Any]:

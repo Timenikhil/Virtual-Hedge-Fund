@@ -129,6 +129,10 @@ def allocate_weights(context: dict[str, Any]) -> list[float]:
         raise ValueError("Context contains no strategies to allocate.")
 
     api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise ValueError(
+            "ANTHROPIC_API_KEY is not set. Configure it or set AI_ALLOCATOR_MODE=disabled."
+        )
     model = os.getenv("AI_WEIGHT_ALLOCATOR_MODEL", DEFAULT_MODEL)
 
     client = anthropic.Anthropic(api_key=api_key)
@@ -141,5 +145,7 @@ def allocate_weights(context: dict[str, Any]) -> list[float]:
         messages=[{"role": "user", "content": user_prompt}],
     )
 
-    response_text = message.content[0].text if message.content else ""
+    if not message.content:
+        raise ValueError("Anthropic API returned an empty content list.")
+    response_text = message.content[0].text
     return _parse_weights(response_text, len(strategies))

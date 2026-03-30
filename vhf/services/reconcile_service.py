@@ -39,7 +39,9 @@ def _next_run_iso(interval_seconds: int) -> str:
 
 def _backoff_next_run_iso(interval_seconds: int, consecutive_errors: int) -> str:
     """Exponential backoff: interval * 2^n, capped at _MAX_BACKOFF_SECONDS."""
-    delay = min(interval_seconds * (2 ** consecutive_errors), _MAX_BACKOFF_SECONDS)
+    # Cap the exponent so 2**n never becomes astronomically large before min() clamps it.
+    capped_n = min(consecutive_errors, 20)
+    delay = min(interval_seconds * (2 ** capped_n), _MAX_BACKOFF_SECONDS)
     return (_utc_now() + timedelta(seconds=delay)).isoformat()
 
 

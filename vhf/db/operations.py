@@ -1012,9 +1012,203 @@ def delete_strategy(strategy_id: str) -> None:
     connection.connect()
     connection.client.sync()
     with closing(connection.client.cursor()) as cursor:
+        # Check existence before any destructive operation.
+        cursor.execute("SELECT 1 FROM strategies WHERE SID = ?", (strategy_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Strategy not found")
         cursor.execute("DELETE FROM strategy_price_history WHERE SID = ?", (strategy_id,))
         cursor.execute("DELETE FROM strategies WHERE SID = ?", (strategy_id,))
-        if cursor.rowcount == 0:
-            raise HTTPException(status_code=404, detail="Strategy not found")
         connection.client.commit()
         connection.client.sync()
+
+
+def get_strategy_price_history_raw(strategy_id: str) -> list[tuple[str, float]]:
+    """Return all (ISO date, price) pairs for a strategy, ordered by date ascending."""
+    connection.connect()
+    connection.client.sync()
+    with closing(connection.client.cursor()) as cursor:
+        cursor.execute(
+            """
+            SELECT TS, PRICE
+            FROM strategy_price_history
+            WHERE SID = ?
+            ORDER BY TS ASC
+            """,
+            (strategy_id,),
+        )
+        rows = cursor.fetchall()
+    result: list[tuple[str, float]] = []
+    for row in rows:
+        try:
+            price = float(row[1])
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(price):
+            result.append((str(row[0]), price))
+    return result
+
+
+def delete_reconcile_job(job_id: int) -> None:
+    """Permanently delete a reconcile job by id."""
+    connection.connect()
+    connection.client.sync()
+    with closing(connection.client.cursor()) as cursor:
+        cursor.execute("SELECT 1 FROM reconcile_jobs WHERE ID = ?", (job_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Reconcile job not found")
+        cursor.execute("DELETE FROM reconcile_jobs WHERE ID = ?", (job_id,))
+        connection.client.commit()
+        connection.client.sync()
+
+
+def update_reconcile_job(
+    job_id: int,
+    *,
+    interval_seconds: int | None = None,
+    method: AllocationMethod | None = None,
+    threshold: float | None = None,
+    apply: bool | None = None,
+    execute_trades: bool | None = None,
+    dry_run_trades: bool | None = None,
+    review_date: str | None = None,
+    ai_provider_mode: AIProviderMode | None = None,
+    ai_strict: bool | None = None,
+    ai_timeout_seconds: float | None = None,
+    ai_context: dict[str, Any] | None = None,
+) -> ReconcileJob:
+    """Partial update of a reconcile job. Only supplied fields are changed."""
+    job = get_reconcile_job(job_id)  # 404 if missing
+
+    if interval_seconds is not None and interval_seconds <= 0:
+        raise HTTPException(status_code=400, detail="interval_seconds must be > 0")
+    if threshold is not None and threshold < 0:
+        raise HTTPException(status_code=400, detail="threshold must be >= 0")
+    if ai_timeout_seconds is not None and (not math.isfinite(ai_timeout_seconds) or ai_timeout_seconds <= 0):
+        raise HTTPException(status_code=400, detail="ai_timeout_seconds must be a finite number > 0")
+
+    new_interval = interval_seconds if interval_seconds is not None else job.interval_seconds
+    new_method = method if method is not None else job.method
+    new_threshold = threshold if threshold is not None else job.threshold
+    new_apply = apply if apply is not None else job.apply
+    new_execute_trades = execute_trades if execute_trades is not None else job.execute_trades
+    new_dry_run_trades = dry_run_trades if dry_run_trades is not None else job.dry_run_trades
+    new_review_date = review_date if review_date is not None else job.review_date
+    new_ai_mode = ai_provider_mode if ai_provider_mode is not None else job.ai_provider_mode
+    new_ai_strict = ai_strict if ai_strict is not None else job.ai_strict
+    new_ai_timeout = ai_timeout_seconds if ai_timeout_seconds is not None else job.ai_timeout_seconds
+    new_ai_context = ai_context if ai_context is not None else job.ai_context
+
+    now_iso = _utc_now_iso()
+    connection.connect()
+    connection.client.sync()
+    with closing(connection.client.cursor()) as cursor:
+        cursor.execute(
+            """
+            UPDATE reconcile_jobs
+            SET INTERVAL_SECONDS   = ?,
+                METHOD             = ?,
+                THRESHOLD          = ?,
+                APPLY              = ?,
+                EXECUTE_TRADES     = ?,
+                DRY_RUN_TRADES     = ?,
+                REVIEW_DATE        = ?,
+                AI_PROVIDER_MODE   = ?,
+                AI_STRICT          = ?,
+                AI_TIMEOUT_SECONDS = ?,
+                AI_CONTEXT         = ?,
+                UPDATED_AT         = ?
+            WHERE ID = ?
+            """,
+            (
+                new_interval,
+                new_method.value,
+                new_threshold,
+                _bool_to_int(new_apply),
+                _bool_to_int(new_execute_trades),
+                _bool_to_int(new_dry_run_trades),
+                new_review_date,
+                new_ai_mode.value if new_ai_mode else None,
+                _bool_to_int(new_ai_strict),
+                float(new_ai_timeout),
+                _json_dumps_safe(new_ai_context),
+                now_iso,
+                job_id,
+            ),
+        )
+        connection.client.commit()
+        connection.client.sync()
+
+    return get_reconcile_job(job_id)
+
+
+def get_allocation_history(portfolio_id: int, limit: int = 50) -> list[dict[str, Any]]:
+    """Return recent allocation snapshots for a portfolio, newest first."""
+    safe_limit = max(1, min(int(limit), 500))
+    connection.connect()
+    connection.client.sync()
+    with closing(connection.client.cursor()) as cursor:
+        cursor.execute(
+            """
+            SELECT ID, PID, METHOD, STRATEGIES, RAW_WEIGHTS, TARGET_WEIGHTS, META, CREATED_AT
+            FROM portfolio_allocations
+            WHERE PID = ?
+            ORDER BY CREATED_AT DESC
+            LIMIT ?
+            """,
+            (portfolio_id, safe_limit),
+        )
+        rows = cursor.fetchall()
+    result = []
+    for row in rows:
+        strategies = deserialize_strategies(row[3])
+        raw_weights = deserialize_weights(row[4])
+        target_weights = deserialize_weights(row[5])
+        result.append({
+            "id": int(row[0]),
+            "portfolio_id": int(row[1]),
+            "method": row[2],
+            "strategies": strategies,
+            "raw_weights": raw_weights,
+            "target_weights": target_weights,
+            "meta": _json_loads_safe(row[6]),
+            "created_at": row[7],
+        })
+    return result
+
+
+def get_rebalance_history(portfolio_id: int, limit: int = 50) -> list[dict[str, Any]]:
+    """Return recent rebalance runs for a portfolio, newest first."""
+    safe_limit = max(1, min(int(limit), 500))
+    connection.connect()
+    connection.client.sync()
+    with closing(connection.client.cursor()) as cursor:
+        cursor.execute(
+            """
+            SELECT ID, PID, ACCOUNT, METHOD, THRESHOLD, STRATEGIES,
+                   CURRENT_WEIGHTS, TARGET_WEIGHTS, TRADE_WEIGHTS, STATUS, META, CREATED_AT
+            FROM rebalance_runs
+            WHERE PID = ?
+            ORDER BY CREATED_AT DESC
+            LIMIT ?
+            """,
+            (portfolio_id, safe_limit),
+        )
+        rows = cursor.fetchall()
+    result = []
+    for row in rows:
+        strategies = deserialize_strategies(row[5])
+        result.append({
+            "id": int(row[0]),
+            "portfolio_id": int(row[1]),
+            "account": row[2],
+            "method": row[3],
+            "threshold": float(row[4]),
+            "strategies": strategies,
+            "current_weights": deserialize_weights(row[6]),
+            "target_weights": deserialize_weights(row[7]),
+            "trade_weights": deserialize_weights(row[8]),
+            "status": row[9],
+            "meta": _json_loads_safe(row[10]),
+            "created_at": row[11],
+        })
+    return result

@@ -28,24 +28,81 @@ Example: {"selector": "topk", "k": 5}
 """
 
 
-def selectStrat(prompt: str | None) -> List[str]:
+_POOL_SYSTEM_PROMPT = """\
+You are a portfolio construction assistant. Given a list of available trading \
+strategies and a natural language description of what the user wants, select the \
+most appropriate strategies for the portfolio.
+
+Return ONLY a JSON array of strategy_id strings from the provided list.
+Do not invent strategy IDs. Only include IDs from the available list.
+No explanation, no markdown. Only the JSON array.
+Example: ["mom_us_large", "quality_factor"]
+"""
+
+
+def selectStrat(prompt: str | None, available_ids: list[str] | None = None) -> list[str]:
     """
-    Lightweight parser for strategy IDs from free-form prompt text.
-    This keeps AI pool creation usable while the full LLM selector pipeline is external.
+    Use Claude to select strategy IDs from available_ids based on a natural language prompt.
+
+    Falls back to returning all available_ids when the prompt is empty or Claude
+    is unavailable. If available_ids is None, returns empty list.
     """
     if not prompt:
+        return available_ids or []
+
+    if not available_ids:
         return []
 
-    seen: set[str] = set()
-    ordered: list[str] = []
-    for token in TOKEN_PATTERN.findall(prompt):
-        strategy_id = token.strip()
-        if strategy_id == "" or strategy_id in seen:
-            continue
-        seen.add(strategy_id)
-        ordered.append(strategy_id)
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    model = os.getenv("AI_WEIGHT_ALLOCATOR_MODEL", "claude-sonnet-4-6")
 
-    return ordered
+    try:
+        if not api_key:
+            raise ValueError("ANTHROPIC_API_KEY is not set")
+
+        pool_list = "\n".join(f"  - {sid}" for sid in available_ids)
+        user_msg = (
+            f"Available strategies:\n{pool_list}\n\n"
+            f"User request: {prompt}\n\n"
+            f"Return a JSON array of strategy_id strings to include in the portfolio."
+        )
+
+        client = anthropic.Anthropic(api_key=api_key)
+        message = client.messages.create(
+            model=model,
+            max_tokens=256,
+            system=_POOL_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_msg}],
+        )
+        if not message.content:
+            raise ValueError("Anthropic API returned empty content")
+
+        response_text = message.content[0].text.strip()
+
+        # Parse JSON array from the response.
+        try:
+            parsed = json.loads(response_text)
+        except json.JSONDecodeError:
+            match = re.search(r"\[.*?\]", response_text, re.DOTALL)
+            if not match:
+                raise ValueError(f"No JSON array in response: {response_text!r}")
+            parsed = json.loads(match.group())
+
+        if not isinstance(parsed, list):
+            raise ValueError("Expected a JSON array")
+
+        # Validate: only keep IDs that actually exist in available_ids.
+        available_set = set(available_ids)
+        selected = [str(sid) for sid in parsed if str(sid) in available_set]
+        if not selected:
+            logger.warning("selectStrat: Claude returned no valid strategy IDs; using all available")
+            return available_ids
+
+        return selected
+
+    except Exception as exc:
+        logger.warning("selectStrat: Claude call failed (%s); returning all available strategies", exc)
+        return available_ids
 
 
 def _momentum(prices: list[float]) -> float:
@@ -129,6 +186,8 @@ def selectSelector(portfolioID: int) -> tuple[PortfolioSelector, int]:
     model = os.getenv("AI_WEIGHT_ALLOCATOR_MODEL", "claude-sonnet-4-6")
 
     try:
+        if not api_key:
+            raise ValueError("ANTHROPIC_API_KEY is not set")
         client = anthropic.Anthropic(api_key=api_key)
         message = client.messages.create(
             model=model,
@@ -136,7 +195,9 @@ def selectSelector(portfolioID: int) -> tuple[PortfolioSelector, int]:
             system=_SELECTOR_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": _build_selector_prompt(portfolioID, summaries)}],
         )
-        response_text = message.content[0].text if message.content else ""
+        if not message.content:
+            raise ValueError("Anthropic API returned an empty content list")
+        response_text = message.content[0].text
         return _parse_selector_response(response_text, n)
     except Exception as exc:
         logger.warning(

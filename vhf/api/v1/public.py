@@ -53,12 +53,17 @@ async def select_pool(pool: PortfolioCreationRequest) -> int:
 @router.post("/ai-select-pool")
 async def ai_select_pool(req: AiPortfolioCreationRequest) -> int:
     """
-    Select strategy pool from all strategies via AI prompt.
+    Select strategy pool from all available strategies via Claude AI.
+    Claude reads the prompt and chooses which strategies to include.
+    Falls back to all strategies if the prompt is empty or Claude is unavailable.
     """
+    all_strategies = get_ranked_strat_list(None, None)
+    available_ids = [s.strategy_id for s in all_strategies.strategies]
+    selected = selectStrat(req.prompt, available_ids)
     pool = PortfolioCreationRequest(
         portfolio_name=req.portfolio_name,
         account=req.account,
-        strategies=selectStrat(req.prompt),
+        strategies=selected,
     )
     return set_db_pool(pool, datetime.datetime.today().isoformat())
 
