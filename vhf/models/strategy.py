@@ -16,7 +16,8 @@ class StrategyList(BaseModel):
     strategies: List[Strategy]
 
 class StrategyPrice(Strategy):
-    prices: List[int] # in cents
+    prices: List[float]
+    dates: List[str] = []  # ISO date strings, same length and order as prices
 
 
 

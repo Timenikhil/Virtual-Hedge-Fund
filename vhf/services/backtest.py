@@ -19,6 +19,10 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from vhf.models.allocation import AllocationMethod
+from vhf.db.operations import (
+    get_db_portfolio_id,
+    get_strategy_price_history_raw,
+)
 
 
 class BacktestRequest(BaseModel):
@@ -154,12 +158,6 @@ def run_backtest(request: BacktestRequest) -> BacktestResult:
         BacktestError: If the portfolio has no strategies, no price data,
                        or the requested date range is too short.
     """
-    # Late import to avoid circular imports at module load time.
-    from vhf.db.operations import (
-        get_db_portfolio_id,
-        get_strategy_price_history_raw,
-    )
-
     portfolio = get_db_portfolio_id(request.portfolio_id)
     strategy_ids = portfolio.strategies
     if not strategy_ids:

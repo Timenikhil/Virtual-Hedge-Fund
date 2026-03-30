@@ -81,6 +81,36 @@ Primary routes:
 - `POST /api/v1/admin/realtime/stop`
 - `GET /api/v1/admin/realtime/dbs`
 
+## Authentication
+
+Admin routes (`/api/v1/admin/*`) require the `X-API-Key` header.
+
+- Set `ADMIN_API_KEY` in your `.env` file.
+- Missing or blank key → `503 Service Unavailable`.
+- Wrong/missing header → `401 Unauthorized`.
+
+The public API (`/api/v1/*`) has no authentication requirement.
+
+## Backtesting
+
+`POST /api/v1/admin/backtest` runs a historical simulation over stored strategy price data.
+
+Request fields:
+- `portfolio_id` — portfolio to backtest
+- `method` — `equal_weight`, `score_weighted`, `ai_weighted`, or `manual`
+- `rebalance_frequency_days` — how often to rebalance (default 30)
+- `start_date` / `end_date` — optional ISO date filters
+- `initial_value` — starting portfolio value (default 100)
+
+Response includes:
+- `total_return_pct`, `annualised_return_pct`, `sharpe_ratio`, `max_drawdown_pct`
+- `daily_values` — `[date, value]` pairs for charting
+- `strategy_legs` — per-strategy final weight and individual return
+
+Notes:
+- No look-ahead bias: weights at rebalance date `t` use only `prices[0..t]`.
+- `ai_weighted` falls back to `score_weighted` to avoid calling Claude once per rebalance date.
+
 ## AI Integration
 
 ### AI Weight Allocator (for `ai_weighted`)
@@ -104,6 +134,11 @@ Accepted AI response payload shapes:
 - `{"allocations": {"SID1": 0.2, "SID2": 0.8}}`
 - `{"SID1": 0.2, "SID2": 0.8}`
 
+### AI-Powered Pool Selection
+`POST /api/v1/ai-select-pool` — accepts a natural language `prompt` and returns a portfolio ID.
+Calls Claude (`claude-sonnet-4-6`) with the full list of available strategy IDs to select the best matching pool.
+Falls back to all available strategies if `ANTHROPIC_API_KEY` is not set.
+
 ### AI in Reconcile Jobs
 Recurring jobs can persist AI allocation parameters directly:
 - `ai_provider_mode`
@@ -115,12 +150,12 @@ These are forwarded into each scheduled rebalance/allocation run.
 
 ## Selector Behavior
 
-Current selector implementation is deterministic:
-- `topk`: first `k` strategies
+Selector implementation:
+- `topk`: first `k` strategies by current ordering
 - `bottomk`: last `k` strategies
-- `ai` selector mode currently falls back to `topk`
+- `ai` selector mode: calls Claude to select the best `k` strategies from the available pool
 
-`ai-select-pool` prompt parsing currently extracts token-like strategy IDs from text.
+`ai-select-pool` uses the Anthropic API to parse a natural language prompt against available strategy IDs.
 
 ## Ranking and Query Behavior
 
@@ -165,9 +200,11 @@ Notes:
 4. QuantRocket adapters perform external sync/execution.
 
 Main modules:
-- `vhf/api/v1/public.py`
-- `vhf/api/v1/admin.py`
+- `vhf/api/auth.py` — API key authentication dependency
+- `vhf/api/v1/public.py` — public routes (no auth)
+- `vhf/api/v1/admin.py` — admin routes (auth required)
 - `vhf/services/allocation_service.py`
+- `vhf/services/backtest.py` — backtesting engine
 - `vhf/services/rebalance_engine.py`
 - `vhf/services/reconcile_service.py`
 - `vhf/services/reconcile_scheduler.py`
@@ -189,8 +226,10 @@ cp .env.example .env
 ```
 
 Set required `.env` values, especially:
-- `DB_URL`
-- `DB_TOKEN`
+- `DB_URL` — libSQL/Turso database URL
+- `DB_TOKEN` — Turso auth token (leave blank for local SQLite)
+- `ADMIN_API_KEY` — secret key for admin endpoints (`X-API-Key` header)
+- `ANTHROPIC_API_KEY` — for AI allocation and AI pool/portfolio selection
 
 ### Install
 ```bash
@@ -251,8 +290,29 @@ Run all tests:
 poetry run python -m unittest discover -s tests -p 'test_*.py'
 ```
 
+## Frontend (Next.js Dashboard)
+
+Located in `frontend/portfolio-management/`.
+
+Features:
+- Portfolio list with return and strategy count
+- Portfolio detail page: pie chart of weights, performance chart (portfolio vs top 3 strategies)
+- Strategy weight editor (manual weight assignment with live rebalance)
+- AI pool selection via natural language prompt
+- Backtest page: configure method, rebalance frequency, date range, initial value; view return/Sharpe/drawdown metrics and daily value chart
+
+Setup:
+```bash
+cd frontend/portfolio-management
+pnpm install
+cp .env.local.example .env.local  # set NEXT_PUBLIC_ADMIN_API_KEY
+pnpm dev
+```
+
+Dashboard available at `http://localhost:3000`.
+
 ## Current Boundaries
 
-- No full historical portfolio simulation engine yet (multi-period backtest of dynamic weights).
-- Risk constraints are basic (no built-in sector caps / turnover limits / volatility targeting).
-- Admin/auth hardening is still needed for production deployment.
+- Risk constraints are basic (no built-in sector caps, turnover limits, or volatility targeting).
+- Scheduler is in-process; for production, consider Celery or a dedicated worker process.
+- Realtime data collection requires a QuantRocket license.

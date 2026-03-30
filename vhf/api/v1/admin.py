@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from vhf.db.operations import (
     bulk_upsert_strategies,
     create_reconcile_job,
+    delete_portfolio,
     delete_reconcile_job,
     delete_strategy,
     get_allocation_history,
@@ -16,6 +17,7 @@ from vhf.db.operations import (
     list_reconcile_jobs,
     record_strategy_price_points,
     set_reconcile_job_enabled,
+    update_portfolio,
     update_reconcile_job,
     upsert_strategy,
 )
@@ -34,6 +36,7 @@ from vhf.execution.live_data import (
     stop_collection,
 )
 from vhf.models.allocation import AIProviderMode, AllocationMethod
+from vhf.models.portfolio import Portfolio
 from vhf.models.reconcile import (
     ReconcileJob,
     ReconcileJobCreateRequest,
@@ -359,6 +362,29 @@ def api_record_strategy_prices(strategy_id: str, req: StrategyPricePointsRequest
     if not req.points:
         raise HTTPException(status_code=400, detail="points list must not be empty")
     record_strategy_price_points(strategy_id, req.points)
+
+
+# ---------------------------------------------------------------------------
+# Portfolio management
+# ---------------------------------------------------------------------------
+
+class PortfolioUpdateRequest(BaseModel):
+    portfolio_name: Optional[str] = None
+    account: Optional[str] = None
+
+
+@router.patch("/portfolios/{portfolio_id}", response_model=Portfolio)
+def api_update_portfolio(portfolio_id: int, req: PortfolioUpdateRequest):
+    """Update a portfolio's name and/or account mapping."""
+    if req.portfolio_name is None and req.account is None:
+        raise HTTPException(status_code=400, detail="Provide at least one field to update.")
+    return update_portfolio(portfolio_id, portfolio_name=req.portfolio_name, account=req.account)
+
+
+@router.delete("/portfolios/{portfolio_id}", status_code=204)
+def api_delete_portfolio(portfolio_id: int):
+    """Permanently delete a portfolio and all its associated data."""
+    delete_portfolio(portfolio_id)
 
 
 # ---------------------------------------------------------------------------

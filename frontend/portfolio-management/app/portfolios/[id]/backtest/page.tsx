@@ -1,0 +1,326 @@
+'use client';
+
+import React, { useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import { ProtectedRoute } from '@/components/ProtectedRoute';
+import { ArrowLeft, Play, TrendingUp, TrendingDown, Activity, AlertTriangle } from 'lucide-react';
+import {
+    ComposedChart,
+    Line,
+    XAxis,
+    YAxis,
+    CartesianGrid,
+    Tooltip,
+    Legend,
+    ResponsiveContainer,
+} from 'recharts';
+import { portfolioAPI, BacktestResult } from '@/lib/api';
+
+const METHODS = [
+    { value: 'equal_weight', label: 'Equal Weight' },
+    { value: 'score_weighted', label: 'Score Weighted (Momentum)' },
+    { value: 'ai_weighted', label: 'AI Weighted' },
+    { value: 'manual', label: 'Manual (Current Weights)' },
+];
+
+function StatCard({
+    label,
+    value,
+    positive,
+    subtitle,
+}: {
+    label: string;
+    value: string;
+    positive?: boolean;
+    subtitle?: string;
+}) {
+    const color =
+        positive === undefined
+            ? 'text-gray-900'
+            : positive
+            ? 'text-green-600'
+            : 'text-red-600';
+    return (
+        <div className="bg-white rounded-lg border p-5">
+            <p className="text-sm text-gray-500 mb-1">{label}</p>
+            <p className={`text-2xl font-bold ${color}`}>{value}</p>
+            {subtitle && <p className="text-xs text-gray-400 mt-1">{subtitle}</p>}
+        </div>
+    );
+}
+
+export default function BacktestPage() {
+    const params = useParams();
+    const router = useRouter();
+    const portfolioId = parseInt(params.id as string, 10);
+
+    const [method, setMethod] = useState('equal_weight');
+    const [rebalanceDays, setRebalanceDays] = useState(30);
+    const [startDate, setStartDate] = useState('');
+    const [endDate, setEndDate] = useState('');
+    const [initialValue, setInitialValue] = useState(100);
+    const [loading, setLoading] = useState(false);
+    const [result, setResult] = useState<BacktestResult | null>(null);
+    const [error, setError] = useState<string | null>(null);
+
+    const runBacktest = async () => {
+        setLoading(true);
+        setError(null);
+        setResult(null);
+        try {
+            const data = await portfolioAPI.runBacktest(
+                portfolioId,
+                method,
+                rebalanceDays,
+                startDate || undefined,
+                endDate || undefined,
+                initialValue,
+            );
+            setResult(data);
+        } catch (e: any) {
+            setError(e.message ?? 'Backtest failed');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const chartData = result?.daily_values.map(([date, value]) => ({
+        date,
+        value: Math.round(value * 100) / 100,
+    }));
+
+    return (
+        <ProtectedRoute>
+            <div className="min-h-screen bg-gray-50">
+                <div className="max-w-7xl mx-auto px-6 py-8">
+                    {/* Header */}
+                    <button
+                        onClick={() => router.push(`/portfolios/${portfolioId}`)}
+                        className="flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-6"
+                    >
+                        <ArrowLeft className="w-5 h-5" />
+                        Back to Portfolio
+                    </button>
+
+                    <h1 className="text-3xl font-bold mb-8">Backtest</h1>
+
+                    {/* Configuration */}
+                    <div className="bg-white rounded-lg border p-6 mb-8">
+                        <h2 className="text-xl font-semibold mb-4">Configuration</h2>
+                        <div className="grid grid-cols-2 gap-6">
+                            {/* Method */}
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Allocation Method
+                                </label>
+                                <select
+                                    value={method}
+                                    onChange={e => setMethod(e.target.value)}
+                                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                >
+                                    {METHODS.map(m => (
+                                        <option key={m.value} value={m.value}>
+                                            {m.label}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            {/* Rebalance frequency */}
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Rebalance Frequency (trading days)
+                                </label>
+                                <input
+                                    type="number"
+                                    min={1}
+                                    max={252}
+                                    value={rebalanceDays}
+                                    onChange={e => setRebalanceDays(parseInt(e.target.value) || 1)}
+                                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                />
+                            </div>
+
+                            {/* Start date */}
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Start Date <span className="text-gray-400">(optional)</span>
+                                </label>
+                                <input
+                                    type="date"
+                                    value={startDate}
+                                    onChange={e => setStartDate(e.target.value)}
+                                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                />
+                            </div>
+
+                            {/* End date */}
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    End Date <span className="text-gray-400">(optional)</span>
+                                </label>
+                                <input
+                                    type="date"
+                                    value={endDate}
+                                    onChange={e => setEndDate(e.target.value)}
+                                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                />
+                            </div>
+
+                            {/* Initial value */}
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Initial Portfolio Value ($)
+                                </label>
+                                <input
+                                    type="number"
+                                    min={1}
+                                    value={initialValue}
+                                    onChange={e => setInitialValue(parseFloat(e.target.value) || 100)}
+                                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                />
+                            </div>
+                        </div>
+
+                        <button
+                            onClick={runBacktest}
+                            disabled={loading}
+                            className="mt-6 flex items-center gap-2 px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                            <Play className="w-4 h-4" />
+                            {loading ? 'Running…' : 'Run Backtest'}
+                        </button>
+                    </div>
+
+                    {/* Error */}
+                    {error && (
+                        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 flex items-start gap-3">
+                            <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+                            <p className="text-red-700">{error}</p>
+                        </div>
+                    )}
+
+                    {/* Results */}
+                    {result && (
+                        <>
+                            {/* Stat cards */}
+                            <div className="grid grid-cols-4 gap-4 mb-8">
+                                <StatCard
+                                    label="Total Return"
+                                    value={`${result.total_return_pct >= 0 ? '+' : ''}${result.total_return_pct.toFixed(2)}%`}
+                                    positive={result.total_return_pct >= 0}
+                                />
+                                <StatCard
+                                    label="Annualised Return"
+                                    value={`${result.annualised_return_pct >= 0 ? '+' : ''}${result.annualised_return_pct.toFixed(2)}%`}
+                                    positive={result.annualised_return_pct >= 0}
+                                    subtitle="CAGR"
+                                />
+                                <StatCard
+                                    label="Sharpe Ratio"
+                                    value={result.sharpe_ratio != null ? result.sharpe_ratio.toFixed(3) : 'N/A'}
+                                    positive={result.sharpe_ratio != null ? result.sharpe_ratio > 0 : undefined}
+                                    subtitle="Risk-adjusted return"
+                                />
+                                <StatCard
+                                    label="Max Drawdown"
+                                    value={`${result.max_drawdown_pct.toFixed(2)}%`}
+                                    positive={false}
+                                    subtitle="Peak-to-trough decline"
+                                />
+                            </div>
+
+                            <div className="grid grid-cols-3 gap-4 mb-8">
+                                <StatCard
+                                    label="Initial Value"
+                                    value={`$${result.initial_value.toLocaleString()}`}
+                                />
+                                <StatCard
+                                    label="Final Value"
+                                    value={`$${result.final_value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                                    positive={result.final_value >= result.initial_value}
+                                />
+                                <StatCard
+                                    label="Trading Days / Rebalances"
+                                    value={`${result.n_trading_days} / ${result.n_rebalances}`}
+                                    subtitle={`${result.start_date} → ${result.end_date}`}
+                                />
+                            </div>
+
+                            {/* Portfolio value chart */}
+                            <div className="bg-white rounded-lg border p-6 mb-8">
+                                <h2 className="text-xl font-semibold mb-4">Portfolio Value Over Time</h2>
+                                <ResponsiveContainer width="100%" height={400}>
+                                    <ComposedChart data={chartData}>
+                                        <CartesianGrid strokeDasharray="3 3" />
+                                        <XAxis
+                                            dataKey="date"
+                                            tickFormatter={d =>
+                                                new Date(d).toLocaleDateString('en-US', {
+                                                    month: 'short',
+                                                    day: 'numeric',
+                                                })
+                                            }
+                                            minTickGap={40}
+                                        />
+                                        <YAxis
+                                            tickFormatter={v => `$${v.toLocaleString()}`}
+                                            width={80}
+                                        />
+                                        <Tooltip
+                                            formatter={(v: number) =>
+                                                `$${v.toLocaleString(undefined, { minimumFractionDigits: 2 })}`
+                                            }
+                                            labelFormatter={d => new Date(d).toLocaleDateString()}
+                                        />
+                                        <Legend />
+                                        <Line
+                                            type="monotone"
+                                            dataKey="value"
+                                            name="Portfolio Value"
+                                            stroke="#3b82f6"
+                                            strokeWidth={2}
+                                            dot={false}
+                                        />
+                                    </ComposedChart>
+                                </ResponsiveContainer>
+                            </div>
+
+                            {/* Strategy legs */}
+                            <div className="bg-white rounded-lg border p-6">
+                                <h2 className="text-xl font-semibold mb-4">Strategy Legs (Final Weights)</h2>
+                                <table className="w-full text-sm">
+                                    <thead>
+                                        <tr className="border-b text-left text-gray-500">
+                                            <th className="pb-2 font-medium">Strategy ID</th>
+                                            <th className="pb-2 font-medium text-right">Final Weight</th>
+                                            <th className="pb-2 font-medium text-right">Total Return</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {result.strategy_legs.map(leg => (
+                                            <tr key={leg.strategy_id} className="border-b last:border-0">
+                                                <td className="py-2 font-mono text-gray-700">{leg.strategy_id}</td>
+                                                <td className="py-2 text-right">
+                                                    {(leg.final_weight * 100).toFixed(1)}%
+                                                </td>
+                                                <td
+                                                    className={`py-2 text-right font-medium ${
+                                                        leg.total_return_pct >= 0 ? 'text-green-600' : 'text-red-600'
+                                                    }`}
+                                                >
+                                                    {leg.total_return_pct >= 0 ? '+' : ''}
+                                                    {leg.total_return_pct.toFixed(2)}%
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </>
+                    )}
+                </div>
+            </div>
+        </ProtectedRoute>
+    );
+}

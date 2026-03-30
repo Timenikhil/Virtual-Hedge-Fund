@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
-import { ArrowLeft, TrendingUp, TrendingDown } from 'lucide-react';
+import { ArrowLeft, TrendingUp, TrendingDown, BarChart2 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, AreaChart, Area, XAxis, YAxis, CartesianGrid, Legend } from 'recharts';
 import {portfolioAPI} from "@/lib/api";
 import StrategyWeightEditor from "@/components/StrategyWeightEditor";
@@ -28,6 +28,7 @@ interface PortfolioDetails {
     total_return: number;
     strategies: Strategy[];
     performance: PerformanceData[];
+    topStrategyNames: string[];
 }
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
@@ -74,9 +75,7 @@ export default function PortfolioDetailPage() {
         );
     }
 
-    const top3Strategies = [...portfolio.strategies]
-        .sort((a, b) => b.weight - a.weight)
-        .slice(0, 3);
+    const top3Names = portfolio.topStrategyNames ?? [];
 
     const pieData = portfolio.strategies.map(s => ({
         name: s.name,
@@ -96,23 +95,32 @@ export default function PortfolioDetailPage() {
                         Back to Portfolios
                     </button>
 
-                    <div className="mb-8">
-                        <h1 className="text-3xl font-bold mb-2">{portfolio.name}</h1>
-                        <div className="flex items-center gap-4">
-                            <div className="flex items-center gap-2">
-                                {portfolio.total_return >= 0 ? (
-                                    <TrendingUp className="w-5 h-5 text-green-600" />
-                                ) : (
-                                    <TrendingDown className="w-5 h-5 text-red-600" />
-                                )}
-                                <span className={`text-2xl font-semibold ${
-                                    portfolio.total_return >= 0 ? 'text-green-600' : 'text-red-600'
-                                }`}>
-                                    {portfolio.total_return >= 0 ? '+' : ''}{portfolio.total_return.toFixed(2)}%
-                                </span>
+                    <div className="mb-8 flex items-start justify-between">
+                        <div>
+                            <h1 className="text-3xl font-bold mb-2">{portfolio.name}</h1>
+                            <div className="flex items-center gap-4">
+                                <div className="flex items-center gap-2">
+                                    {portfolio.total_return >= 0 ? (
+                                        <TrendingUp className="w-5 h-5 text-green-600" />
+                                    ) : (
+                                        <TrendingDown className="w-5 h-5 text-red-600" />
+                                    )}
+                                    <span className={`text-2xl font-semibold ${
+                                        portfolio.total_return >= 0 ? 'text-green-600' : 'text-red-600'
+                                    }`}>
+                                        {portfolio.total_return >= 0 ? '+' : ''}{portfolio.total_return.toFixed(2)}%
+                                    </span>
+                                </div>
+                                <span className="text-gray-600">Total Return</span>
                             </div>
-                            <span className="text-gray-600">Total Return</span>
                         </div>
+                        <button
+                            onClick={() => router.push(`/portfolios/${portfolio.id}/backtest`)}
+                            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+                        >
+                            <BarChart2 className="w-4 h-4" />
+                            Run Backtest
+                        </button>
                     </div>
 
                     <div className="grid grid-cols-2 gap-6 mb-8">
@@ -198,33 +206,39 @@ export default function PortfolioDetailPage() {
                                     fillOpacity={1}
                                     fill="url(#colorPortfolio)"
                                 />
-                                <Area
-                                    type="monotone"
-                                    dataKey="strategy1"
-                                    name={top3Strategies[0]?.name}
-                                    stroke="#10b981"
-                                    strokeWidth={2}
-                                    fillOpacity={1}
-                                    fill="url(#colorStrategy1)"
-                                />
-                                <Area
-                                    type="monotone"
-                                    dataKey="strategy2"
-                                    name={top3Strategies[1]?.name}
-                                    stroke="#f59e0b"
-                                    strokeWidth={2}
-                                    fillOpacity={1}
-                                    fill="url(#colorStrategy2)"
-                                />
-                                <Area
-                                    type="monotone"
-                                    dataKey="strategy3"
-                                    name={top3Strategies[2]?.name}
-                                    stroke="#ef4444"
-                                    strokeWidth={2}
-                                    fillOpacity={1}
-                                    fill="url(#colorStrategy3)"
-                                />
+                                {top3Names[0] && (
+                                    <Area
+                                        type="monotone"
+                                        dataKey="strategy1"
+                                        name={top3Names[0]}
+                                        stroke="#10b981"
+                                        strokeWidth={2}
+                                        fillOpacity={1}
+                                        fill="url(#colorStrategy1)"
+                                    />
+                                )}
+                                {top3Names[1] && (
+                                    <Area
+                                        type="monotone"
+                                        dataKey="strategy2"
+                                        name={top3Names[1]}
+                                        stroke="#f59e0b"
+                                        strokeWidth={2}
+                                        fillOpacity={1}
+                                        fill="url(#colorStrategy2)"
+                                    />
+                                )}
+                                {top3Names[2] && (
+                                    <Area
+                                        type="monotone"
+                                        dataKey="strategy3"
+                                        name={top3Names[2]}
+                                        stroke="#ef4444"
+                                        strokeWidth={2}
+                                        fillOpacity={1}
+                                        fill="url(#colorStrategy3)"
+                                    />
+                                )}
                             </AreaChart>
                         </ResponsiveContainer>
                     </div>

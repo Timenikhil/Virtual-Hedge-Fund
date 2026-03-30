@@ -730,10 +730,11 @@ def _get_legacy_strategy_prices(record: tuple[Any, ...]) -> list[int]:
     ]
 
 
-def _get_strategy_history_prices(cursor, sid: str, limit: int = DEFAULT_STRATEGY_HISTORY_LIMIT) -> list[int]:
+def _get_strategy_history(cursor, sid: str, limit: int = DEFAULT_STRATEGY_HISTORY_LIMIT) -> tuple[list[str], list[float]]:
+    """Return (dates, prices) for a strategy's price history, ordered by date ascending."""
     cursor.execute(
         """
-        SELECT PRICE
+        SELECT TS, PRICE
         FROM strategy_price_history
         WHERE SID = ?
         ORDER BY TS ASC
@@ -742,15 +743,17 @@ def _get_strategy_history_prices(cursor, sid: str, limit: int = DEFAULT_STRATEGY
         (sid, max(int(limit), 1)),
     )
     rows = cursor.fetchall()
-    prices: list[int] = []
+    dates: list[str] = []
+    prices: list[float] = []
     for row in rows:
         try:
-            numeric_price = float(row[0])
+            numeric_price = float(row[1])
         except (TypeError, ValueError):
             continue
         if math.isfinite(numeric_price):
-            prices.append(int(round(numeric_price)))
-    return prices
+            dates.append(str(row[0]))
+            prices.append(round(numeric_price, 4))
+    return dates, prices
 
 
 def get_db_portfolio(name: str) -> Portfolio:
@@ -808,7 +811,7 @@ def get_db_portfolio_id(pid: int) -> Portfolio:
 
 
 def get_db_strat(sid: str) -> StrategyPrice:
-    """Retrieve strategy by id with historical prices when available."""
+    """Retrieve strategy by id with historical prices and dates when available."""
     connection.connect()
     connection.client.sync()
     with closing(connection.client.cursor()) as cursor:
@@ -824,8 +827,13 @@ def get_db_strat(sid: str) -> StrategyPrice:
         if not record:
             raise HTTPException(status_code=404, detail="Strategy not found")
 
-        history_prices = _get_strategy_history_prices(cursor, sid)
-        prices = history_prices if history_prices else _get_legacy_strategy_prices(record)
+        history_dates, history_prices = _get_strategy_history(cursor, sid)
+        if history_prices:
+            prices = history_prices
+            dates = history_dates
+        else:
+            prices = [float(p) for p in _get_legacy_strategy_prices(record)]
+            dates = []
 
         return StrategyPrice(
             strategy_id=record[0],
@@ -833,6 +841,7 @@ def get_db_strat(sid: str) -> StrategyPrice:
             description=record[2],
             category=record[3],
             prices=prices,
+            dates=dates,
         )
 
 
@@ -1174,6 +1183,64 @@ def get_allocation_history(portfolio_id: int, limit: int = 50) -> list[dict[str,
             "created_at": row[7],
         })
     return result
+
+
+def delete_portfolio(portfolio_id: int) -> None:
+    """Delete a portfolio and all its associated data (accounts, allocations, rebalances, jobs)."""
+    connection.connect()
+    connection.client.sync()
+    with closing(connection.client.cursor()) as cursor:
+        cursor.execute("SELECT 1 FROM portfolios WHERE PID = ?", (portfolio_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Portfolio not found")
+        # Delete in dependency order.
+        cursor.execute("DELETE FROM reconcile_jobs WHERE PID = ?", (portfolio_id,))
+        cursor.execute("DELETE FROM rebalance_runs WHERE PID = ?", (portfolio_id,))
+        cursor.execute("DELETE FROM portfolio_allocations WHERE PID = ?", (portfolio_id,))
+        cursor.execute("DELETE FROM portfolio_accounts WHERE PID = ?", (portfolio_id,))
+        cursor.execute("DELETE FROM portfolios WHERE PID = ?", (portfolio_id,))
+        connection.client.commit()
+        connection.client.sync()
+
+
+def update_portfolio(
+    portfolio_id: int,
+    *,
+    portfolio_name: str | None = None,
+    account: str | None = None,
+) -> Portfolio:
+    """Update a portfolio's name and/or account mapping."""
+    # 404 if missing.
+    portfolio = get_db_portfolio_id(portfolio_id)
+    now_iso = _utc_now_iso()
+
+    connection.connect()
+    connection.client.sync()
+    with closing(connection.client.cursor()) as cursor:
+        if portfolio_name is not None:
+            new_name = portfolio_name.strip()
+            if not new_name:
+                raise HTTPException(status_code=400, detail="portfolio_name must be non-empty")
+            cursor.execute(
+                "UPDATE portfolios SET PNAME = ? WHERE PID = ?",
+                (new_name, portfolio_id),
+            )
+        if account is not None:
+            new_account = account.strip()
+            if not new_account:
+                raise HTTPException(status_code=400, detail="account must be non-empty")
+            cursor.execute(
+                """
+                INSERT INTO portfolio_accounts (PID, ACCOUNT)
+                VALUES (?, ?)
+                ON CONFLICT(PID) DO UPDATE SET ACCOUNT = excluded.ACCOUNT
+                """,
+                (portfolio_id, new_account),
+            )
+        connection.client.commit()
+        connection.client.sync()
+
+    return get_db_portfolio_id(portfolio_id)
 
 
 def get_rebalance_history(portfolio_id: int, limit: int = 50) -> list[dict[str, Any]]:
