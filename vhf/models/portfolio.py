@@ -33,5 +33,5 @@ class PortfolioWeights(PortfolioID):
     weights : List[float]
 
 class PortfolioSelectorRequest(PortfolioID) :
-    selector : PortfolioSelector | None = None,
+    selector : PortfolioSelector | None = None
     k:int = 10

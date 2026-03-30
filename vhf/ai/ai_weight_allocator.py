@@ -1,0 +1,145 @@
+"""
+Local AI weight allocator using the Anthropic Claude API.
+
+This module is the default implementation for AI_ALLOCATOR_MODE=local.
+It receives a portfolio context dict and returns a list of weights,
+one per strategy, which are then normalised by the allocation service.
+
+Required env var:
+    ANTHROPIC_API_KEY  – Anthropic API key
+
+Optional env var:
+    AI_WEIGHT_ALLOCATOR_MODEL  – Claude model to use (default: claude-sonnet-4-6)
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+from typing import Any
+
+import anthropic
+
+DEFAULT_MODEL = "claude-sonnet-4-6"
+MAX_TOKENS = 512
+
+_SYSTEM_PROMPT = """\
+You are a quantitative portfolio manager. Your task is to allocate capital \
+across a set of algorithmic trading strategies based on their historical \
+performance and characteristics.
+
+Rules:
+- Return ONLY a JSON array of weights, one per strategy, in the same order \
+  as the input.
+- All weights must be non-negative numbers.
+- The weights do not need to sum to 1 — the caller will normalise them.
+- Do not include any explanation, markdown, or extra text. Only the JSON array.
+"""
+
+
+def _build_prompt(context: dict[str, Any]) -> str:
+    strategies: list[str] = context.get("strategies", [])
+    strategy_data: list[dict] = context.get("strategy_data", [])
+    current_weights: list[float] | None = context.get("current_weights")
+    request_context: dict | None = context.get("request_context")
+
+    summaries: list[str] = []
+    for sd in strategy_data:
+        prices: list[float] = sd.get("prices", [])
+        latest = sd.get("latest_price")
+        count = sd.get("price_count", 0)
+
+        if len(prices) >= 2:
+            pct_change = (prices[-1] - prices[0]) / prices[0] * 100 if prices[0] else 0
+            trend = f"{pct_change:+.1f}% over {count} periods"
+        elif latest is not None:
+            trend = f"latest price {latest}"
+        else:
+            trend = "no price history"
+
+        summaries.append(
+            f"  - {sd.get('strategy_id', '?')} "
+            f"({sd.get('name', 'unnamed')}, {sd.get('category', 'uncategorised')}): "
+            f"{trend}"
+        )
+
+    lines: list[str] = [
+        f"Portfolio has {len(strategies)} strategies:",
+        *summaries,
+    ]
+
+    if current_weights and len(current_weights) == len(strategies):
+        cw_str = ", ".join(f"{w:.3f}" for w in current_weights)
+        lines.append(f"\nCurrent weights: [{cw_str}]")
+
+    if request_context:
+        lines.append(f"\nAdditional context: {json.dumps(request_context)}")
+
+    lines.append(
+        f"\nReturn a JSON array of exactly {len(strategies)} non-negative weights."
+    )
+
+    return "\n".join(lines)
+
+
+def _parse_weights(text: str, expected_len: int) -> list[float]:
+    """Extract the first JSON array from the model response."""
+    text = text.strip()
+
+    # Try direct parse first (model returned only the array).
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, list) and len(parsed) == expected_len:
+            return [float(v) for v in parsed]
+    except (json.JSONDecodeError, ValueError, TypeError):
+        pass
+
+    # Fall back to regex extraction.
+    match = re.search(r"\[[\d.,\s\-eE]+\]", text)
+    if match:
+        try:
+            parsed = json.loads(match.group())
+            if isinstance(parsed, list) and len(parsed) == expected_len:
+                return [float(v) for v in parsed]
+        except (json.JSONDecodeError, ValueError, TypeError):
+            pass
+
+    raise ValueError(
+        f"Could not parse {expected_len} weights from model response: {text!r}"
+    )
+
+
+def allocate_weights(context: dict[str, Any]) -> list[float]:
+    """
+    Call Claude to produce a weight vector for the given portfolio context.
+
+    Args:
+        context: Portfolio context dict as built by allocation_service._build_ai_context().
+
+    Returns:
+        List of raw (un-normalised) weights, one per strategy.
+
+    Raises:
+        ValueError: If the model response cannot be parsed into a valid weight vector.
+        anthropic.APIError: On API communication failures.
+    """
+    strategies: list[str] = context.get("strategies", [])
+    if not strategies:
+        raise ValueError("Context contains no strategies to allocate.")
+
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    model = os.getenv("AI_WEIGHT_ALLOCATOR_MODEL", DEFAULT_MODEL)
+
+    client = anthropic.Anthropic(api_key=api_key)
+    user_prompt = _build_prompt(context)
+
+    message = client.messages.create(
+        model=model,
+        max_tokens=MAX_TOKENS,
+        system=_SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": user_prompt}],
+    )
+
+    response_text = message.content[0].text if message.content else ""
+    return _parse_weights(response_text, len(strategies))

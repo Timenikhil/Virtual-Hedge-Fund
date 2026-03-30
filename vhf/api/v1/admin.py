@@ -1,13 +1,18 @@
 from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
-from typing import Dict, Optional, List
+from pydantic import BaseModel, Field
+from typing import Any, Dict, Optional, List, Tuple
 from vhf.db.operations import (
+    bulk_upsert_strategies,
     create_reconcile_job,
+    delete_strategy,
     get_reconcile_job,
     list_reconcile_jobs,
+    record_strategy_price_points,
     set_reconcile_job_enabled,
+    upsert_strategy,
 )
+from vhf.models.strategy import Strategy
 from vhf.execution.alpaca_trade_api import (
     trade_strategy_to_alpaca,
     generate_orders_csv,
@@ -62,6 +67,10 @@ def api_create_reconcile_job(req: ReconcileJobCreateRequest):
         execute_trades=req.execute_trades,
         dry_run_trades=req.dry_run_trades,
         review_date=req.review_date,
+        ai_provider_mode=req.ai_provider_mode,
+        ai_strict=req.ai_strict,
+        ai_timeout_seconds=req.ai_timeout_seconds,
+        ai_context=req.ai_context,
         enabled=req.enabled,
     )
 
@@ -256,3 +265,63 @@ def api_get_db(code: str):
         return get_db(code)
     except RealtimeError as e:
         raise HTTPException(status_code=502, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Strategy management
+# ---------------------------------------------------------------------------
+
+class StrategyUpsertRequest(BaseModel):
+    strategy_id: str
+    name: str
+    description: str = ""
+    category: str = ""
+
+
+class StrategyPricePointsRequest(BaseModel):
+    """List of (ISO timestamp, price) pairs to record for a strategy."""
+    points: List[Tuple[str, float]] = Field(default_factory=list)
+
+
+@router.post("/strategies", response_model=Strategy)
+def api_upsert_strategy(req: StrategyUpsertRequest):
+    """
+    Create or update a single strategy record.
+    """
+    if not req.strategy_id.strip():
+        raise HTTPException(status_code=400, detail="strategy_id must be non-empty")
+    return upsert_strategy(
+        strategy_id=req.strategy_id.strip(),
+        name=req.name,
+        description=req.description,
+        category=req.category,
+    )
+
+
+@router.post("/strategies/bulk", response_model=List[Strategy])
+def api_bulk_upsert_strategies(strategies: List[StrategyUpsertRequest]):
+    """
+    Create or update multiple strategy records in a single transaction.
+    """
+    if not strategies:
+        raise HTTPException(status_code=400, detail="strategies list must not be empty")
+    return bulk_upsert_strategies([s.model_dump() for s in strategies])
+
+
+@router.delete("/strategies/{strategy_id}", status_code=204)
+def api_delete_strategy(strategy_id: str):
+    """
+    Delete a strategy and all its price history.
+    """
+    delete_strategy(strategy_id)
+
+
+@router.post("/strategies/{strategy_id}/prices", status_code=204)
+def api_record_strategy_prices(strategy_id: str, req: StrategyPricePointsRequest):
+    """
+    Append or upsert historical price points for a strategy.
+    Each point is a [ISO-timestamp, price] pair.
+    """
+    if not req.points:
+        raise HTTPException(status_code=400, detail="points list must not be empty")
+    record_strategy_price_points(strategy_id, req.points)

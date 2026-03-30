@@ -8,6 +8,7 @@ from typing import Any, Protocol
 
 import requests
 
+from vhf.logging.log import logger
 from vhf.models.allocation import AIProviderMode
 
 
@@ -84,16 +85,31 @@ class RemoteWeightAllocatorProvider:
         return f"remote:{self.url}"
 
     def allocate(self, context: dict[str, Any], *, timeout_seconds: float) -> Any:
+        if not self.url.startswith("https://"):
+            logger.warning(
+                "Remote AI allocator URL does not use HTTPS (%s). "
+                "API key and context data will be transmitted unencrypted.",
+                self.url,
+            )
+
         headers: dict[str, str] = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
+
+        effective_timeout = timeout_seconds if timeout_seconds > 0 else DEFAULT_REMOTE_REQUEST_TIMEOUT_SECONDS
+        if timeout_seconds <= 0:
+            logger.warning(
+                "Invalid timeout_seconds=%s for remote AI provider; using default %ss.",
+                timeout_seconds,
+                DEFAULT_REMOTE_REQUEST_TIMEOUT_SECONDS,
+            )
 
         try:
             response = requests.post(
                 self.url,
                 json=context,
                 headers=headers,
-                timeout=timeout_seconds if timeout_seconds > 0 else DEFAULT_REMOTE_REQUEST_TIMEOUT_SECONDS,
+                timeout=effective_timeout,
             )
             response.raise_for_status()
         except requests.RequestException as exc:
@@ -111,7 +127,9 @@ def _resolve_mode(requested_mode: AIProviderMode | None) -> AIProviderMode:
 
     raw_mode = os.getenv(ENV_AI_PROVIDER_MODE, AIProviderMode.auto.value).strip().lower()
     if raw_mode not in ALLOWED_PROVIDER_MODES:
-        # Invalid config should not crash the service; fall back to auto.
+        logger.warning(
+            "Unknown AI_ALLOCATOR_MODE '%s'; falling back to auto.", raw_mode
+        )
         return AIProviderMode.auto
     return AIProviderMode(raw_mode)
 
@@ -151,11 +169,16 @@ def resolve_allocator_provider(
         # Lightweight sanity check so we fail fast if local provider is not importable.
         importlib.import_module(local_provider.module_path)
         return AIProviderMode.local, local_provider
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning(
+            "Auto mode: local AI provider not available (%s); trying remote.", exc
+        )
 
     try:
         remote_provider = _build_remote_provider()
         return AIProviderMode.remote, remote_provider
-    except WeightAllocatorProviderError:
+    except WeightAllocatorProviderError as exc:
+        logger.warning(
+            "Auto mode: remote AI provider not available (%s); AI allocator disabled.", exc
+        )
         return AIProviderMode.disabled, DisabledWeightAllocatorProvider()

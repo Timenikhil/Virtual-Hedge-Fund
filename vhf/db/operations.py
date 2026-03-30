@@ -1,17 +1,71 @@
 import json
+import math
 from contextlib import closing
-from datetime import datetime, timezone
-from typing import Any, List
+from datetime import datetime, timedelta, timezone
+from typing import Any, Iterable, List
 
 from fastapi import HTTPException
 
 from vhf.db import connection
 from vhf.logging.log import logger
-from vhf.models.allocation import AllocationMethod
+from vhf.models.allocation import AIProviderMode, AllocationMethod, DEFAULT_AI_TIMEOUT_SECONDS
 from vhf.models.portfolio import Portfolio, PortfolioCreationRequest, PortfolioList
-from vhf.models.reconcile import ReconcileJob
+from vhf.models.reconcile import DEFAULT_RECONCILE_LOCK_TIMEOUT_SECONDS, ReconcileJob
 from vhf.models.strategy import Strategy, StrategyList, StrategyPrice
 from vhf.quantrocket.allocations import AllocationError, update_account_allocations
+
+DEFAULT_STRATEGY_HISTORY_LIMIT = 5000
+DEFAULT_RECONCILE_CLAIM_LIMIT = 100
+ORDER_DESC_PREFIX = "-"
+
+ALLOWED_PORTFOLIO_SORT_COLUMNS: dict[str, str] = {
+    "id": "PID",
+    "pid": "PID",
+    "name": "PNAME",
+    "pname": "PNAME",
+    "date": "DATE",
+    "live": "LIVE",
+}
+
+ALLOWED_STRATEGY_SORT_COLUMNS: dict[str, str] = {
+    "id": "SID",
+    "sid": "SID",
+    "name": "NAME",
+    "category": "CATEGORY",
+    "p0": "P0",
+    "p1": "P1",
+    "p2": "P2",
+    "p3": "P3",
+    "p4": "P4",
+    "p5": "P5",
+    "latest": "P5",
+}
+
+RECONCILE_JOB_SELECT_COLUMNS = """
+    ID,
+    PID,
+    INTERVAL_SECONDS,
+    METHOD,
+    THRESHOLD,
+    APPLY,
+    EXECUTE_TRADES,
+    DRY_RUN_TRADES,
+    REVIEW_DATE,
+    ENABLED,
+    AI_PROVIDER_MODE,
+    AI_STRICT,
+    AI_TIMEOUT_SECONDS,
+    AI_CONTEXT,
+    CREATED_AT,
+    UPDATED_AT,
+    LAST_RUN_AT,
+    NEXT_RUN_AT,
+    LAST_STATUS,
+    LAST_ERROR,
+    LOCKED_AT,
+    LOCKED_BY,
+    CONSECUTIVE_ERRORS
+"""
 
 
 def serialize_weights(weights: List[float] | List[str]) -> str:
@@ -36,8 +90,23 @@ def _json_dumps_safe(value: dict[str, Any] | None) -> str | None:
     return json.dumps(value, separators=(",", ":"), sort_keys=True)
 
 
+def _json_loads_safe(value: str | None) -> dict[str, Any] | None:
+    if not value:
+        return None
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        logger.warning("Failed to parse JSON payload from DB")
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _utc_now_dt() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return _utc_now_dt().isoformat()
 
 
 def _bool_to_int(value: bool) -> int:
@@ -56,6 +125,55 @@ def _to_allocation_method(raw: str) -> AllocationMethod:
         return AllocationMethod.manual
 
 
+def _to_ai_provider_mode(raw: str | None) -> AIProviderMode | None:
+    if raw is None or raw == "":
+        return None
+    try:
+        return AIProviderMode(raw)
+    except ValueError:
+        logger.warning("Unknown AI provider mode '%s'; defaulting to None", raw)
+        return None
+
+
+def _iso_minus_seconds(base_iso: str, seconds: int) -> str:
+    try:
+        base_dt = datetime.fromisoformat(base_iso)
+    except ValueError:
+        base_dt = _utc_now_dt()
+    return (base_dt - timedelta(seconds=max(int(seconds), 0))).isoformat()
+
+
+def _validate_limit(limit: int | None) -> int | None:
+    if limit is None:
+        return None
+    if limit <= 0:
+        raise HTTPException(status_code=400, detail="limit must be > 0")
+    return int(limit)
+
+
+def _build_order_clause(
+    rank_by: str | None,
+    *,
+    allowed_columns: dict[str, str],
+    default_column: str,
+) -> str:
+    if not rank_by:
+        return f"{default_column} ASC"
+
+    raw = rank_by.strip()
+    if raw == "":
+        return f"{default_column} ASC"
+
+    is_desc = raw.startswith(ORDER_DESC_PREFIX)
+    key = raw[1:] if is_desc else raw
+    column = allowed_columns.get(key.lower())
+    if not column:
+        valid = ", ".join(sorted(allowed_columns.keys()))
+        raise HTTPException(status_code=400, detail=f"Unsupported rankBy '{rank_by}'. Valid values: {valid}")
+
+    return f"{column} {'DESC' if is_desc else 'ASC'}"
+
+
 def _row_to_reconcile_job(row: tuple[Any, ...]) -> ReconcileJob:
     return ReconcileJob(
         job_id=int(row[0]),
@@ -68,12 +186,19 @@ def _row_to_reconcile_job(row: tuple[Any, ...]) -> ReconcileJob:
         dry_run_trades=_int_to_bool(row[7]),
         review_date=row[8],
         enabled=_int_to_bool(row[9]),
-        created_at=row[10],
-        updated_at=row[11],
-        last_run_at=row[12],
-        next_run_at=row[13],
-        last_status=row[14],
-        last_error=row[15],
+        ai_provider_mode=_to_ai_provider_mode(row[10]),
+        ai_strict=_int_to_bool(row[11]),
+        ai_timeout_seconds=float(row[12]) if row[12] is not None else DEFAULT_AI_TIMEOUT_SECONDS,
+        ai_context=_json_loads_safe(row[13]),
+        created_at=row[14],
+        updated_at=row[15],
+        last_run_at=row[16],
+        next_run_at=row[17],
+        last_status=row[18],
+        last_error=row[19],
+        locked_at=row[20],
+        locked_by=row[21],
+        consecutive_errors=int(row[22]) if row[22] is not None else 0,
     )
 
 
@@ -96,9 +221,7 @@ def get_portfolio_account(portfolioID: int) -> str | None:
 
 
 def set_portfolio_account(portfolioID: int, account: str) -> None:
-    """
-    Map a portfolio to a QuantRocket account (1:1).
-    """
+    """Map a portfolio to a QuantRocket account (1:1)."""
     connection.connect()
     connection.client.sync()
     with closing(connection.client.cursor()) as cursor:
@@ -116,8 +239,8 @@ def set_portfolio_account(portfolioID: int, account: str) -> None:
 
 def _sync_allocations_from_db(portfolioID: int) -> None:
     """
-    Sync the given portfolio's strategies/weights to QuantRocket allocations
-    based on the mapped account. No-op if no mapping exists.
+    Sync the given portfolio's strategies/weights to QuantRocket allocations.
+    Requires explicit, length-matching weights to avoid silent truncation.
     """
     account = _get_portfolio_account(portfolioID)
     if not account:
@@ -128,18 +251,25 @@ def _sync_allocations_from_db(portfolioID: int) -> None:
     logger.info("Syncing allocations for portfolio %s to account %s", portfolioID, account)
 
     codes = portfolio.strategies
-    weights = portfolio.weights
-    if len(codes) != len(weights):
-        min_len = min(len(codes), len(weights))
-        logger.warning(
-            "Strategy/weight length mismatch for portfolio %s: %s vs %s. Truncating to %s.",
-            portfolioID,
-            len(codes),
-            len(weights),
-            min_len,
+    weights = portfolio.weights or []
+
+    if not weights:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Portfolio {portfolioID} has no weights configured. "
+                "Seed weights before syncing allocations."
+            ),
         )
-        codes = codes[:min_len]
-        weights = weights[:min_len]
+
+    if len(codes) != len(weights):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Portfolio {portfolioID} has {len(codes)} strategies but {len(weights)} weights. "
+                "Update weights to match strategy count before syncing allocations."
+            ),
+        )
 
     try:
         update_account_allocations(account, codes, weights)
@@ -148,9 +278,7 @@ def _sync_allocations_from_db(portfolioID: int) -> None:
 
 
 def set_db_pool(pool: PortfolioCreationRequest, date: str) -> int:
-    """
-    Store the given Portfolio in the database and return the portfolio id.
-    """
+    """Store the given portfolio in the database and return the portfolio id."""
     connection.connect()
     connection.client.sync()
     with closing(connection.client.cursor()) as cursor:
@@ -170,9 +298,7 @@ def set_db_pool(pool: PortfolioCreationRequest, date: str) -> int:
 
 
 def update_portfolio_strats(portfolioID: int, strats: List[str]) -> None:
-    """
-    Update strategy IDs for a portfolio.
-    """
+    """Update strategy IDs for a portfolio."""
     connection.connect()
     connection.client.sync()
     with closing(connection.client.cursor()) as cursor:
@@ -191,9 +317,7 @@ def update_portfolio_strats(portfolioID: int, strats: List[str]) -> None:
 
 
 def update_portfolio_weights(portfolioID: int, weights: List[float]) -> None:
-    """
-    Update normalized portfolio weights.
-    """
+    """Update normalized portfolio weights."""
     connection.connect()
     connection.client.sync()
     with closing(connection.client.cursor()) as cursor:
@@ -221,7 +345,7 @@ def record_allocation_snapshot(
     meta: dict[str, Any] | None = None,
     created_at: str | None = None,
 ) -> None:
-    created = created_at or datetime.utcnow().isoformat()
+    created = created_at or _utc_now_iso()
 
     connection.connect()
     connection.client.sync()
@@ -266,7 +390,7 @@ def record_rebalance_run(
     meta: dict[str, Any] | None = None,
     created_at: str | None = None,
 ) -> None:
-    created = created_at or datetime.utcnow().isoformat()
+    created = created_at or _utc_now_iso()
 
     connection.connect()
     connection.client.sync()
@@ -315,12 +439,19 @@ def create_reconcile_job(
     execute_trades: bool,
     dry_run_trades: bool,
     review_date: str | None,
+    ai_provider_mode: AIProviderMode | None = None,
+    ai_strict: bool = False,
+    ai_timeout_seconds: float = DEFAULT_AI_TIMEOUT_SECONDS,
+    ai_context: dict[str, Any] | None = None,
     enabled: bool,
 ) -> ReconcileJob:
     if interval_seconds <= 0:
         raise HTTPException(status_code=400, detail="interval_seconds must be > 0")
     if threshold < 0:
         raise HTTPException(status_code=400, detail="threshold must be >= 0")
+    if not math.isfinite(ai_timeout_seconds) or ai_timeout_seconds <= 0:
+        raise HTTPException(status_code=400, detail="ai_timeout_seconds must be a finite number > 0")
+
     # Fail fast if portfolio does not exist.
     _ = get_db_portfolio_id(portfolio_id)
 
@@ -342,10 +473,16 @@ def create_reconcile_job(
                 DRY_RUN_TRADES,
                 REVIEW_DATE,
                 ENABLED,
+                AI_PROVIDER_MODE,
+                AI_STRICT,
+                AI_TIMEOUT_SECONDS,
+                AI_CONTEXT,
                 CREATED_AT,
                 UPDATED_AT,
-                NEXT_RUN_AT
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                NEXT_RUN_AT,
+                LOCKED_AT,
+                LOCKED_BY
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
             """,
             (
                 portfolio_id,
@@ -357,6 +494,10 @@ def create_reconcile_job(
                 _bool_to_int(dry_run_trades),
                 review_date,
                 _bool_to_int(enabled),
+                ai_provider_mode.value if ai_provider_mode else None,
+                _bool_to_int(ai_strict),
+                float(ai_timeout_seconds),
+                _json_dumps_safe(ai_context),
                 now_iso,
                 now_iso,
                 next_run_at,
@@ -374,24 +515,8 @@ def get_reconcile_job(job_id: int) -> ReconcileJob:
     connection.client.sync()
     with closing(connection.client.cursor()) as cursor:
         cursor.execute(
-            """
-            SELECT
-                ID,
-                PID,
-                INTERVAL_SECONDS,
-                METHOD,
-                THRESHOLD,
-                APPLY,
-                EXECUTE_TRADES,
-                DRY_RUN_TRADES,
-                REVIEW_DATE,
-                ENABLED,
-                CREATED_AT,
-                UPDATED_AT,
-                LAST_RUN_AT,
-                NEXT_RUN_AT,
-                LAST_STATUS,
-                LAST_ERROR
+            f"""
+            SELECT {RECONCILE_JOB_SELECT_COLUMNS}
             FROM reconcile_jobs
             WHERE ID = ?
             """,
@@ -408,24 +533,8 @@ def list_reconcile_jobs() -> List[ReconcileJob]:
     connection.client.sync()
     with closing(connection.client.cursor()) as cursor:
         cursor.execute(
-            """
-            SELECT
-                ID,
-                PID,
-                INTERVAL_SECONDS,
-                METHOD,
-                THRESHOLD,
-                APPLY,
-                EXECUTE_TRADES,
-                DRY_RUN_TRADES,
-                REVIEW_DATE,
-                ENABLED,
-                CREATED_AT,
-                UPDATED_AT,
-                LAST_RUN_AT,
-                NEXT_RUN_AT,
-                LAST_STATUS,
-                LAST_ERROR
+            f"""
+            SELECT {RECONCILE_JOB_SELECT_COLUMNS}
             FROM reconcile_jobs
             ORDER BY ID ASC
             """
@@ -436,37 +545,77 @@ def list_reconcile_jobs() -> List[ReconcileJob]:
 
 def list_due_reconcile_jobs(now_iso: str | None = None) -> List[ReconcileJob]:
     current_iso = now_iso or _utc_now_iso()
+    stale_lock_before = _iso_minus_seconds(current_iso, DEFAULT_RECONCILE_LOCK_TIMEOUT_SECONDS)
     connection.connect()
     connection.client.sync()
     with closing(connection.client.cursor()) as cursor:
         cursor.execute(
-            """
-            SELECT
-                ID,
-                PID,
-                INTERVAL_SECONDS,
-                METHOD,
-                THRESHOLD,
-                APPLY,
-                EXECUTE_TRADES,
-                DRY_RUN_TRADES,
-                REVIEW_DATE,
-                ENABLED,
-                CREATED_AT,
-                UPDATED_AT,
-                LAST_RUN_AT,
-                NEXT_RUN_AT,
-                LAST_STATUS,
-                LAST_ERROR
+            f"""
+            SELECT {RECONCILE_JOB_SELECT_COLUMNS}
             FROM reconcile_jobs
             WHERE ENABLED = 1
               AND (NEXT_RUN_AT IS NULL OR NEXT_RUN_AT <= ?)
+              AND (LOCKED_AT IS NULL OR LOCKED_AT <= ?)
             ORDER BY ID ASC
             """,
-            (current_iso,),
+            (current_iso, stale_lock_before),
         )
         rows = cursor.fetchall()
         return [_row_to_reconcile_job(row) for row in rows]
+
+
+def claim_due_reconcile_jobs(
+    *,
+    worker_id: str,
+    now_iso: str | None = None,
+    lock_timeout_seconds: int = DEFAULT_RECONCILE_LOCK_TIMEOUT_SECONDS,
+    limit: int = DEFAULT_RECONCILE_CLAIM_LIMIT,
+) -> List[ReconcileJob]:
+    if worker_id.strip() == "":
+        raise HTTPException(status_code=400, detail="worker_id must be non-empty")
+
+    current_iso = now_iso or _utc_now_iso()
+    stale_lock_before = _iso_minus_seconds(current_iso, lock_timeout_seconds)
+    safe_limit = max(int(limit), 1)
+
+    connection.connect()
+    connection.client.sync()
+    with closing(connection.client.cursor()) as cursor:
+        cursor.execute(
+            f"""
+            SELECT {RECONCILE_JOB_SELECT_COLUMNS}
+            FROM reconcile_jobs
+            WHERE ENABLED = 1
+              AND (NEXT_RUN_AT IS NULL OR NEXT_RUN_AT <= ?)
+              AND (LOCKED_AT IS NULL OR LOCKED_AT <= ?)
+            ORDER BY ID ASC
+            LIMIT ?
+            """,
+            (current_iso, stale_lock_before, safe_limit),
+        )
+        rows = cursor.fetchall()
+
+        claimed_ids: list[int] = []
+        for row in rows:
+            job_id = int(row[0])
+            cursor.execute(
+                """
+                UPDATE reconcile_jobs
+                SET LOCKED_AT = ?,
+                    LOCKED_BY = ?,
+                    UPDATED_AT = ?
+                WHERE ID = ?
+                  AND (LOCKED_AT IS NULL OR LOCKED_AT <= ?)
+                """,
+                (current_iso, worker_id, current_iso, job_id, stale_lock_before),
+            )
+            if cursor.rowcount == 1:
+                claimed_ids.append(job_id)
+
+        connection.client.commit()
+        connection.client.sync()
+
+    return [get_reconcile_job(job_id) for job_id in claimed_ids]
 
 
 def set_reconcile_job_enabled(job_id: int, enabled: bool) -> ReconcileJob:
@@ -479,7 +628,11 @@ def set_reconcile_job_enabled(job_id: int, enabled: bool) -> ReconcileJob:
         cursor.execute(
             """
             UPDATE reconcile_jobs
-            SET ENABLED = ?, UPDATED_AT = ?, NEXT_RUN_AT = ?
+            SET ENABLED = ?,
+                UPDATED_AT = ?,
+                NEXT_RUN_AT = ?,
+                LOCKED_AT = NULL,
+                LOCKED_BY = NULL
             WHERE ID = ?
             """,
             (_bool_to_int(enabled), now_iso, next_run, job_id),
@@ -499,6 +652,7 @@ def update_reconcile_job_after_run(
     last_error: str | None,
     next_run_at: str | None,
     last_run_at: str | None = None,
+    success: bool = True,
 ) -> None:
     run_iso = last_run_at or _utc_now_iso()
     updated_iso = _utc_now_iso()
@@ -506,14 +660,25 @@ def update_reconcile_job_after_run(
     connection.connect()
     connection.client.sync()
     with closing(connection.client.cursor()) as cursor:
+        # Reset error streak on success; increment on failure.
+        if success:
+            consecutive_errors_expr = "0"
+            consecutive_errors_params: tuple = ()
+        else:
+            consecutive_errors_expr = "COALESCE(CONSECUTIVE_ERRORS, 0) + 1"
+            consecutive_errors_params = ()
+
         cursor.execute(
-            """
+            f"""
             UPDATE reconcile_jobs
             SET LAST_RUN_AT = ?,
                 NEXT_RUN_AT = ?,
                 LAST_STATUS = ?,
                 LAST_ERROR = ?,
-                UPDATED_AT = ?
+                UPDATED_AT = ?,
+                LOCKED_AT = NULL,
+                LOCKED_BY = NULL,
+                CONSECUTIVE_ERRORS = {consecutive_errors_expr}
             WHERE ID = ?
             """,
             (run_iso, next_run_at, last_status, last_error, updated_iso, job_id),
@@ -524,16 +689,78 @@ def update_reconcile_job_after_run(
         connection.client.sync()
 
 
+def record_strategy_price_points(strategy_id: str, points: Iterable[tuple[str, float]]) -> None:
+    """Append or upsert historical strategy prices."""
+    payload: list[tuple[str, str, float]] = []
+    for ts, price in points:
+        try:
+            numeric_price = float(price)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(numeric_price):
+            continue
+        payload.append((strategy_id, ts, numeric_price))
+
+    if not payload:
+        return
+
+    connection.connect()
+    connection.client.sync()
+    with closing(connection.client.cursor()) as cursor:
+        cursor.executemany(
+            """
+            INSERT INTO strategy_price_history (SID, TS, PRICE)
+            VALUES (?, ?, ?)
+            ON CONFLICT(SID, TS) DO UPDATE SET PRICE = excluded.PRICE
+            """,
+            payload,
+        )
+        connection.client.commit()
+        connection.client.sync()
+
+
+def _get_legacy_strategy_prices(record: tuple[Any, ...]) -> list[int]:
+    return [
+        int(record[4]),
+        int(record[5]),
+        int(record[6]),
+        int(record[7]),
+        int(record[8]),
+        int(record[9]),
+    ]
+
+
+def _get_strategy_history_prices(cursor, sid: str, limit: int = DEFAULT_STRATEGY_HISTORY_LIMIT) -> list[int]:
+    cursor.execute(
+        """
+        SELECT PRICE
+        FROM strategy_price_history
+        WHERE SID = ?
+        ORDER BY TS ASC
+        LIMIT ?
+        """,
+        (sid, max(int(limit), 1)),
+    )
+    rows = cursor.fetchall()
+    prices: list[int] = []
+    for row in rows:
+        try:
+            numeric_price = float(row[0])
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(numeric_price):
+            prices.append(int(round(numeric_price)))
+    return prices
+
+
 def get_db_portfolio(name: str) -> Portfolio:
-    """
-    Retrieve Portfolio by Name.
-    """
+    """Retrieve portfolio by name."""
     connection.connect()
     connection.client.sync()
     with closing(connection.client.cursor()) as cursor:
         cursor.execute(
             """
-            SELECT PID, PNAME, WEIGHTS, SIDS, LIVE
+            SELECT PID, PNAME, WEIGHTS, SIDS, LIVE, DATE
             FROM portfolios
             WHERE PNAME = ?
             """,
@@ -549,19 +776,18 @@ def get_db_portfolio(name: str) -> Portfolio:
             weights=deserialize_weights(record[2]),
             strategies=deserialize_strategies(record[3]),
             live=bool(int(record[4])),
+            date=record[5],
         )
 
 
 def get_db_portfolio_id(pid: int) -> Portfolio:
-    """
-    Retrieve Portfolio by Id.
-    """
+    """Retrieve portfolio by id."""
     connection.connect()
     connection.client.sync()
     with closing(connection.client.cursor()) as cursor:
         cursor.execute(
             """
-            SELECT PID, PNAME, WEIGHTS, SIDS, LIVE
+            SELECT PID, PNAME, WEIGHTS, SIDS, LIVE, DATE
             FROM portfolios
             WHERE PID = ?
             """,
@@ -577,13 +803,12 @@ def get_db_portfolio_id(pid: int) -> Portfolio:
             weights=deserialize_weights(record[2]),
             strategies=deserialize_strategies(record[3]),
             live=bool(int(record[4])),
+            date=record[5],
         )
 
 
 def get_db_strat(sid: str) -> StrategyPrice:
-    """
-    Retrieve Strategy by Id.
-    """
+    """Retrieve strategy by id with historical prices when available."""
     connection.connect()
     connection.client.sync()
     with closing(connection.client.cursor()) as cursor:
@@ -599,39 +824,41 @@ def get_db_strat(sid: str) -> StrategyPrice:
         if not record:
             raise HTTPException(status_code=404, detail="Strategy not found")
 
+        history_prices = _get_strategy_history_prices(cursor, sid)
+        prices = history_prices if history_prices else _get_legacy_strategy_prices(record)
+
         return StrategyPrice(
             strategy_id=record[0],
             name=record[1],
             description=record[2],
             category=record[3],
-            prices=[record[4], record[5], record[6], record[7], record[8], record[9]],
+            prices=prices,
         )
 
 
-def get_ranked_list(rankBy: str, limit: int | None) -> PortfolioList:
-    """
-    Retrieve portfolios optionally capped by limit.
-    """
+def get_ranked_list(rankBy: str | None, limit: int | None) -> PortfolioList:
+    """Retrieve portfolios with optional rank/sort and limit."""
+    safe_limit = _validate_limit(limit)
+    order_clause = _build_order_clause(
+        rankBy,
+        allowed_columns=ALLOWED_PORTFOLIO_SORT_COLUMNS,
+        default_column="PID",
+    )
+
     connection.connect()
     connection.client.sync()
     with closing(connection.client.cursor()) as cursor:
-        if limit:
-            cursor.execute(
-                """
-                SELECT PID, PNAME, WEIGHTS, SIDS, LIVE, DATE
-                FROM portfolios
-                LIMIT ?
-                """,
-                (limit,),
-            )
-        else:
-            cursor.execute(
-                """
-                SELECT PID, PNAME, WEIGHTS, SIDS, LIVE, DATE
-                FROM portfolios
-                """
-            )
+        query = f"""
+            SELECT PID, PNAME, WEIGHTS, SIDS, LIVE, DATE
+            FROM portfolios
+            ORDER BY {order_clause}
+        """
+        params: tuple[Any, ...] = ()
+        if safe_limit is not None:
+            query += " LIMIT ?"
+            params = (safe_limit,)
 
+        cursor.execute(query, params)
         records = cursor.fetchall()
         if not records:
             return PortfolioList(portfolios=[])
@@ -647,30 +874,29 @@ def get_ranked_list(rankBy: str, limit: int | None) -> PortfolioList:
         return PortfolioList(portfolios=list(map(mapper, records)))
 
 
-def get_ranked_strat_list(rankBy: str, limit: int | None) -> StrategyList:
-    """
-    Retrieve strategies optionally capped by limit.
-    """
+def get_ranked_strat_list(rankBy: str | None, limit: int | None) -> StrategyList:
+    """Retrieve strategies with optional rank/sort and limit."""
+    safe_limit = _validate_limit(limit)
+    order_clause = _build_order_clause(
+        rankBy,
+        allowed_columns=ALLOWED_STRATEGY_SORT_COLUMNS,
+        default_column="SID",
+    )
+
     connection.connect()
     connection.client.sync()
     with closing(connection.client.cursor()) as cursor:
-        if limit:
-            cursor.execute(
-                """
-                SELECT SID, NAME, DESCRIPTION, CATEGORY
-                FROM strategies
-                LIMIT ?
-                """,
-                (limit,),
-            )
-        else:
-            cursor.execute(
-                """
-                SELECT SID, NAME, DESCRIPTION, CATEGORY
-                FROM strategies
-                """
-            )
+        query = f"""
+            SELECT SID, NAME, DESCRIPTION, CATEGORY, P0, P1, P2, P3, P4, P5
+            FROM strategies
+            ORDER BY {order_clause}
+        """
+        params: tuple[Any, ...] = ()
+        if safe_limit is not None:
+            query += " LIMIT ?"
+            params = (safe_limit,)
 
+        cursor.execute(query, params)
         records = cursor.fetchall()
         if not records:
             return StrategyList(strategies=[])
@@ -685,9 +911,7 @@ def get_ranked_strat_list(rankBy: str, limit: int | None) -> StrategyList:
 
 
 def get_sids(pid: int) -> List[str]:
-    """
-    Retrieve strategy IDs by portfolio id.
-    """
+    """Retrieve strategy IDs by portfolio id."""
     connection.connect()
     connection.client.sync()
     with closing(connection.client.cursor()) as cursor:
@@ -704,3 +928,93 @@ def get_sids(pid: int) -> List[str]:
             raise HTTPException(status_code=404, detail="Portfolio not found")
 
         return deserialize_strategies(record[0])
+
+
+def upsert_strategy(
+    *,
+    strategy_id: str,
+    name: str,
+    description: str,
+    category: str,
+) -> Strategy:
+    """Insert or update a strategy record. Legacy P0-P5 columns are zeroed."""
+    connection.connect()
+    connection.client.sync()
+    with closing(connection.client.cursor()) as cursor:
+        cursor.execute(
+            """
+            INSERT INTO strategies (SID, NAME, DESCRIPTION, CATEGORY, P0, P1, P2, P3, P4, P5)
+            VALUES (?, ?, ?, ?, 0, 0, 0, 0, 0, 0)
+            ON CONFLICT(SID) DO UPDATE SET
+                NAME        = excluded.NAME,
+                DESCRIPTION = excluded.DESCRIPTION,
+                CATEGORY    = excluded.CATEGORY
+            """,
+            (strategy_id, name, description, category),
+        )
+        connection.client.commit()
+        connection.client.sync()
+
+    return Strategy(
+        strategy_id=strategy_id,
+        name=name,
+        description=description,
+        category=category,
+    )
+
+
+def bulk_upsert_strategies(
+    strategies: List[dict[str, Any]],
+) -> List[Strategy]:
+    """
+    Upsert multiple strategy records in a single transaction.
+
+    Each dict must have keys: strategy_id, name, description, category.
+    Returns the upserted Strategy objects in input order.
+    """
+    if not strategies:
+        return []
+
+    payload: list[tuple] = []
+    results: list[Strategy] = []
+    for s in strategies:
+        sid = str(s.get("strategy_id", "")).strip()
+        name = str(s.get("name", "")).strip()
+        description = str(s.get("description", "")).strip()
+        category = str(s.get("category", "")).strip()
+        if not sid:
+            raise HTTPException(status_code=400, detail="strategy_id must be non-empty")
+        payload.append((sid, name, description, category))
+        results.append(Strategy(strategy_id=sid, name=name, description=description, category=category))
+
+    connection.connect()
+    connection.client.sync()
+    with closing(connection.client.cursor()) as cursor:
+        cursor.executemany(
+            """
+            INSERT INTO strategies (SID, NAME, DESCRIPTION, CATEGORY, P0, P1, P2, P3, P4, P5)
+            VALUES (?, ?, ?, ?, 0, 0, 0, 0, 0, 0)
+            ON CONFLICT(SID) DO UPDATE SET
+                NAME        = excluded.NAME,
+                DESCRIPTION = excluded.DESCRIPTION,
+                CATEGORY    = excluded.CATEGORY
+            """,
+            payload,
+        )
+        connection.client.commit()
+        connection.client.sync()
+
+    return results
+
+
+def delete_strategy(strategy_id: str) -> None:
+    """Delete a strategy and its price history."""
+    connection.connect()
+    connection.client.sync()
+    with closing(connection.client.cursor()) as cursor:
+        cursor.execute("DELETE FROM strategy_price_history WHERE SID = ?", (strategy_id,))
+        cursor.execute("DELETE FROM strategies WHERE SID = ?", (strategy_id,))
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Strategy not found")
+        connection.client.commit()
+        connection.client.sync()

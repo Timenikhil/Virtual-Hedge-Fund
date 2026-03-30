@@ -30,8 +30,17 @@ def _utc_now_iso() -> str:
     return _utc_now().isoformat()
 
 
+_MAX_BACKOFF_SECONDS = 24 * 60 * 60  # cap at 24 h
+
+
 def _next_run_iso(interval_seconds: int) -> str:
     return (_utc_now() + timedelta(seconds=interval_seconds)).isoformat()
+
+
+def _backoff_next_run_iso(interval_seconds: int, consecutive_errors: int) -> str:
+    """Exponential backoff: interval * 2^n, capped at _MAX_BACKOFF_SECONDS."""
+    delay = min(interval_seconds * (2 ** consecutive_errors), _MAX_BACKOFF_SECONDS)
+    return (_utc_now() + timedelta(seconds=delay)).isoformat()
 
 
 def run_reconcile_job(job_id: int) -> ReconcileRunResult:
@@ -49,6 +58,10 @@ def run_reconcile_job(job_id: int) -> ReconcileRunResult:
                 method=job.method,
                 threshold=job.threshold,
                 apply=job.apply,
+                ai_provider_mode=job.ai_provider_mode,
+                ai_strict=job.ai_strict,
+                ai_timeout_seconds=job.ai_timeout_seconds,
+                ai_context=job.ai_context,
             )
         )
 
@@ -62,10 +75,17 @@ def run_reconcile_job(job_id: int) -> ReconcileRunResult:
             if not job.apply:
                 raise ReconcileServiceError("execute_trades requires apply=true so weights and execution stay aligned.")
 
-            if plan.rebalance_required:
+            if not plan.account:
+                raise ReconcileServiceError(
+                    f"Portfolio {job.portfolio_id} has no mapped account; cannot execute live trades safely."
+                )
+
+            trade_legs = [leg for leg in plan.legs if leg.trade_weight != 0]
+            if trade_legs:
                 trades_executed = True
-                accounts = [plan.account] if plan.account else None
-                for strategy_id in plan.strategies:
+                accounts = [plan.account]
+                for leg in trade_legs:
+                    strategy_id = leg.strategy_id
                     try:
                         if job.dry_run_trades:
                             csv_orders = generate_orders_csv(
@@ -78,7 +98,11 @@ def run_reconcile_job(job_id: int) -> ReconcileRunResult:
                                     strategy_id=strategy_id,
                                     mode="dry_run",
                                     status="ok",
-                                    detail={"rows": csv_orders.count("\n")},
+                                    detail={
+                                        "rows": csv_orders.count("\n"),
+                                        "action": leg.action,
+                                        "trade_weight": leg.trade_weight,
+                                    },
                                 )
                             )
                         else:
@@ -92,7 +116,11 @@ def run_reconcile_job(job_id: int) -> ReconcileRunResult:
                                     strategy_id=strategy_id,
                                     mode="live",
                                     status=str(trade_output.get("status", "ok")),
-                                    detail=trade_output,
+                                    detail={
+                                        "action": leg.action,
+                                        "trade_weight": leg.trade_weight,
+                                        "trade_output": trade_output,
+                                    },
                                 )
                             )
                     except QuantRocketError as exc:
@@ -129,25 +157,30 @@ def run_reconcile_job(job_id: int) -> ReconcileRunResult:
             last_error="; ".join(errors) if errors else None,
             last_run_at=generated_at,
             next_run_at=next_run_at,
+            success=not bool(errors),
         )
         return result
 
     except (AllocationServiceError, RebalanceEngineError, ReconcileServiceError) as exc:
+        backoff_next_run = _backoff_next_run_iso(job.interval_seconds, job.consecutive_errors)
         update_reconcile_job_after_run(
             job_id=job.job_id,
             last_status="error",
             last_error=str(exc),
             last_run_at=generated_at,
-            next_run_at=next_run_at,
+            next_run_at=backoff_next_run,
+            success=False,
         )
         raise
     except Exception as exc:
+        backoff_next_run = _backoff_next_run_iso(job.interval_seconds, job.consecutive_errors)
         update_reconcile_job_after_run(
             job_id=job.job_id,
             last_status="error",
             last_error=f"unexpected: {exc}",
             last_run_at=generated_at,
-            next_run_at=next_run_at,
+            next_run_at=backoff_next_run,
+            success=False,
         )
         logger.exception("Unexpected reconcile failure for job_id=%s", job.job_id)
         raise ReconcileServiceError(f"Unexpected reconcile failure: {exc}") from exc

@@ -1,10 +1,15 @@
 import os
+import tempfile
+import threading
 from pathlib import Path
 from typing import Dict, List
 
 import yaml
 
 ALLOCATIONS_PATH = Path("/codeload/quantrocket.moonshot.allocations.yml")
+
+# Serialise concurrent writes within this process to prevent YAML corruption.
+_write_lock = threading.Lock()
 
 
 class AllocationError(RuntimeError):
@@ -44,11 +49,26 @@ def _write_allocations(data: Dict[str, List[Dict[str, float]]]) -> None:
     for account, entries in data.items():
         structured[account] = {item["code"]: float(item["weight"]) for item in entries}
     _ensure_parent()
+
+    content = yaml.safe_dump(structured, sort_keys=True, default_flow_style=False)
+
+    # Atomic write: write to a temp file in the same directory, then rename.
+    # os.replace() is atomic on POSIX when src and dst are on the same filesystem.
+    tmp_path = None
     try:
-        ALLOCATIONS_PATH.write_text(
-            yaml.safe_dump(structured, sort_keys=True, default_flow_style=False)
+        fd, tmp_path = tempfile.mkstemp(
+            dir=ALLOCATIONS_PATH.parent,
+            suffix=".yml.tmp",
         )
+        with os.fdopen(fd, "w") as f:
+            f.write(content)
+        os.replace(tmp_path, ALLOCATIONS_PATH)
     except Exception as exc:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
         raise AllocationError(f"Failed to write allocations file: {exc}") from exc
 
 
@@ -57,7 +77,8 @@ def update_account_allocations(account: str, codes: List[str], weights: List[flo
         raise AllocationError(
             f"Strategies and weights length mismatch ({len(codes)} vs {len(weights)})"
         )
-    existing = read_allocations()
-    entries = [{"code": code, "weight": weight} for code, weight in zip(codes, weights)]
-    existing[account] = entries
-    _write_allocations(existing)
+    with _write_lock:
+        existing = read_allocations()
+        entries = [{"code": code, "weight": weight} for code, weight in zip(codes, weights)]
+        existing[account] = entries
+        _write_allocations(existing)

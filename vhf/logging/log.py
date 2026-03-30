@@ -34,9 +34,9 @@ if LOKI_URL:
     loki_handler = LokiQueueHandler(
         url=LOKI_URL,
         auth=(LOKI_USERNAME, LOKI_PASSWORD),
-        tags={"application": "virtual-hedge-fundF", "environment": "production"},
+        tags={"application": "virtual-hedge-fund", "environment": "production"},
         version="1",
-        queue= Queue(-1)
+        queue=Queue(1000)
     )
     logger.addHandler(loki_handler)
 

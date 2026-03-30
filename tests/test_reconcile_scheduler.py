@@ -8,9 +8,9 @@ from vhf.services.reconcile_scheduler import ReconcileScheduler
 
 class ReconcileSchedulerTest(unittest.IsolatedAsyncioTestCase):
     @patch("vhf.services.reconcile_scheduler.run_reconcile_job")
-    @patch("vhf.services.reconcile_scheduler.list_due_reconcile_jobs")
-    async def test_run_due_jobs_once_executes_each_due_job(self, mock_list_due, mock_run_job):
-        mock_list_due.return_value = [
+    @patch("vhf.services.reconcile_scheduler.claim_due_reconcile_jobs")
+    async def test_run_due_jobs_once_executes_each_claimed_job(self, mock_claim_due, mock_run_job):
+        mock_claim_due.return_value = [
             ReconcileJob(
                 job_id=1,
                 portfolio_id=10,
@@ -63,11 +63,12 @@ class ReconcileSchedulerTest(unittest.IsolatedAsyncioTestCase):
             ),
         ]
 
-        scheduler = ReconcileScheduler(poll_interval_seconds=86400)
+        scheduler = ReconcileScheduler(poll_interval_seconds=86400, worker_id="test-worker")
         results = await scheduler.run_due_jobs_once()
 
         self.assertEqual(len(results), 2)
         self.assertEqual(mock_run_job.call_count, 2)
+        mock_claim_due.assert_called_once_with(worker_id="test-worker")
 
 
 if __name__ == "__main__":
