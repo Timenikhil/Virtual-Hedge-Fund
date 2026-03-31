@@ -810,6 +810,75 @@ def get_db_portfolio_id(pid: int) -> Portfolio:
         )
 
 
+def get_portfolios_summary() -> list[dict]:
+    """
+    Return all portfolios with return_percentage and strategy names computed server-side.
+    Uses a minimal set of SQL queries — no N+1 fetching.
+    """
+    connection.connect()
+    connection.client.sync()
+    with closing(connection.client.cursor()) as cursor:
+        cursor.execute("SELECT PID, PNAME, WEIGHTS, SIDS, DATE, LIVE FROM portfolios ORDER BY PID")
+        portfolio_rows = cursor.fetchall()
+
+        cursor.execute(
+            """
+            SELECT SID, PRICE
+            FROM strategy_price_history
+            WHERE TS IN (SELECT MIN(TS) FROM strategy_price_history GROUP BY SID)
+            UNION ALL
+            SELECT SID, PRICE
+            FROM strategy_price_history
+            WHERE TS IN (SELECT MAX(TS) FROM strategy_price_history GROUP BY SID)
+            """
+        )
+        price_rows = cursor.fetchall()
+
+        cursor.execute("SELECT SID, NAME FROM strategies")
+        strategy_name_rows = cursor.fetchall()
+
+    strategy_names: dict[str, str] = {sid: name for sid, name in strategy_name_rows}
+
+    # First occurrence per SID = first price, second = last price
+    first_prices: dict[str, float] = {}
+    last_prices: dict[str, float] = {}
+    for sid, price in price_rows:
+        p = float(price)
+        if sid not in first_prices:
+            first_prices[sid] = p
+        else:
+            last_prices[sid] = p
+
+    result = []
+    for pid, pname, weights_str, sids_str, date, live in portfolio_rows:
+        strategies = deserialize_strategies(sids_str)
+        weights = deserialize_weights(weights_str)
+        n = len(strategies)
+
+        initial = 0.0
+        final = 0.0
+        for i, sid in enumerate(strategies):
+            w = weights[i] if i < len(weights) else 0.0
+            fp = first_prices.get(sid)
+            lp = last_prices.get(sid)
+            if fp is not None and lp is not None:
+                initial += fp * w
+                final += lp * w
+
+        return_pct = ((final - initial) / initial * 100) if initial > 0 else 0.0
+        result.append({
+            "id": int(pid),
+            "name": pname,
+            "created_at": date or "",
+            "strategy_count": n,
+            "strategy_names": [strategy_names.get(sid, sid) for sid in strategies],
+            "total_value": round(final),
+            "return_percentage": round(return_pct, 4),
+            "live": bool(int(live)) if live is not None else False,
+        })
+    return result
+
+
 def get_db_strat(sid: str) -> StrategyPrice:
     """Retrieve strategy by id with historical prices and dates when available."""
     connection.connect()

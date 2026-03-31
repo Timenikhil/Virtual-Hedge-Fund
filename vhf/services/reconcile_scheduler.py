@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import socket
+from datetime import datetime, timezone
 
 from vhf.db.operations import claim_due_reconcile_jobs
 from vhf.logging.log import logger
@@ -13,7 +14,7 @@ SECONDS_PER_MINUTE = 60
 SECONDS_PER_HOUR = 60 * SECONDS_PER_MINUTE
 SECONDS_PER_DAY = 24 * SECONDS_PER_HOUR
 
-DEFAULT_SCHEDULER_POLL_SECONDS = SECONDS_PER_DAY
+DEFAULT_SCHEDULER_POLL_SECONDS = SECONDS_PER_MINUTE
 MIN_SCHEDULER_POLL_SECONDS = 5
 
 DEFAULT_WORKER_ID = f"{socket.gethostname()}:{os.getpid()}"
@@ -34,10 +35,18 @@ class ReconcileScheduler:
             self.worker_id = DEFAULT_WORKER_ID
         self._task: asyncio.Task | None = None
         self._stop_event = asyncio.Event()
+        self._last_poll_at: datetime | None = None
 
     @property
     def is_running(self) -> bool:
         return self._task is not None and not self._task.done()
+
+    @property
+    def next_poll_at(self) -> datetime | None:
+        if not self.is_running or self._last_poll_at is None:
+            return None
+        from datetime import timedelta
+        return self._last_poll_at + timedelta(seconds=self.poll_interval_seconds)
 
     async def start(self) -> None:
         if self.is_running:
@@ -62,6 +71,7 @@ class ReconcileScheduler:
             logger.info("Reconcile scheduler stopped")
 
     async def run_due_jobs_once(self) -> list[ReconcileRunResult]:
+        self._last_poll_at = datetime.now(timezone.utc)
         due_jobs = await asyncio.to_thread(claim_due_reconcile_jobs, worker_id=self.worker_id)
         results: list[ReconcileRunResult] = []
         for job in due_jobs:

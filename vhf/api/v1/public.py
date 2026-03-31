@@ -10,6 +10,7 @@ from vhf.db.operations import (
     get_db_portfolio,
     get_db_portfolio_id,
     get_db_strat,
+    get_portfolios_summary,
     get_ranked_list,
     get_ranked_strat_list,
     get_sids,
@@ -140,6 +141,14 @@ async def get_portfolios(rankBy: str | None = None, limit: int | None = None) ->
     Return a list of portfolios ranked by rankBy.
     """
     return get_ranked_list(rankBy, limit)
+
+
+@router.get("/portfolios/summary")
+async def get_portfolios_summary_endpoint() -> list[dict]:
+    """
+    Return all portfolios with return_percentage computed server-side in a single SQL query.
+    """
+    return get_portfolios_summary()
 
 
 @router.get("/portfolio")

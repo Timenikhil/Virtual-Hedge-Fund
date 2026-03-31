@@ -170,10 +170,12 @@ async def api_stop_reconcile_scheduler():
 @router.get("/reconcile/scheduler/status")
 def api_reconcile_scheduler_status():
     """Return scheduler configuration and current runtime status."""
+    next_poll = scheduler.next_poll_at
     return {
         "enabled_by_config": SCHEDULER_ENABLED,
         "running": scheduler.is_running,
         "poll_interval_seconds": scheduler.poll_interval_seconds,
+        "next_poll_at": next_poll.isoformat() if next_poll else None,
     }
 
 

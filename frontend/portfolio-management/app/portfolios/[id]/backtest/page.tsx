@@ -268,8 +268,8 @@ export default function BacktestPage() {
                                             width={80}
                                         />
                                         <Tooltip
-                                            formatter={(v: number) =>
-                                                `$${v.toLocaleString(undefined, { minimumFractionDigits: 2 })}`
+                                            formatter={(v: number | undefined) =>
+                                                v != null ? `$${v.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : ''
                                             }
                                             labelFormatter={d => new Date(d).toLocaleDateString()}
                                         />

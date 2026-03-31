@@ -280,7 +280,7 @@ The scheduler is in-process with the API process.
 
 Env knobs:
 - `RECONCILE_SCHEDULER_ENABLED` (default `true`)
-- `RECONCILE_SCHEDULER_POLL_SECONDS` (default `86400`)
+- `RECONCILE_SCHEDULER_POLL_SECONDS` (default `60`) — how often the scheduler wakes up to check for due jobs. Must be ≤ the shortest `interval_seconds` of any reconcile job, otherwise jobs will run less frequently than configured.
 - `RECONCILE_SCHEDULER_WORKER_ID` (optional)
 
 ## Testing
@@ -305,7 +305,6 @@ Setup:
 ```bash
 cd frontend/portfolio-management
 pnpm install
-cp .env.local.example .env.local  # set NEXT_PUBLIC_ADMIN_API_KEY
 pnpm dev
 ```
 

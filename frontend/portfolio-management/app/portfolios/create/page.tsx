@@ -1,12 +1,13 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
-import { Filter, Settings, Shuffle, Sliders, RefreshCw, ChevronDown, Play } from 'lucide-react';
+import { Filter, Settings, Shuffle, Sliders, RefreshCw, ChevronDown, Play, ArrowLeft } from 'lucide-react';
 import { portfolioAPI } from '@/lib/api';
 import { StrategySelector, Strategy } from '@/components/StrategySelector';
 import { StepCard } from '@/components/StepCard';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
-import {useRouter} from "next/navigation";
+import { useRouter } from 'next/navigation';
+import { useToast } from '@/contexts/ToastContext';
 
 // const INITIAL_STRATEGIES: Strategy[] = [
 //     { id: 'strat-1', name: 'Momentum Strategy', description: 'Trend-following based on price momentum', category: 'Trend' },
@@ -23,6 +24,7 @@ const INITIAL_STRATEGIES = await portfolioAPI.getStrategies();
 
 export default function PortfolioManagement() {
     const router = useRouter();
+    const toast = useToast();
     const [workflowMode, setWorkflowMode] = useState<'manual' | 'automatic'>('manual');
     const [currentStep, setCurrentStep] = useState(1);
     const [portfolioName, setPortfolioName] = useState('');
@@ -71,35 +73,35 @@ export default function PortfolioManagement() {
             }
             setPortfolioId(id);
             handleStepComplete(1);
-        } catch (error) {
-            console.error('Error in Step 1:', error);
+        } catch {
+            toast.error('Failed to create strategy pool');
         }
     };
 
     const handleStep2Submit = async () => {
         if (!portfolioId) return;
         try {
-            let strats : string[]
+            let strats: string[];
             if (workflowMode === 'manual') {
                 strats = await portfolioAPI.selectPortfolio(portfolioId, selector, selectorK);
             } else {
                 strats = await portfolioAPI.aiSelectPortfolio(portfolioId);
             }
             setStrategies(strategies.filter(s => strats.includes(s.strategy_id)));
-            setSelectedStrategies([]); // Reset selections for Step 3
+            setSelectedStrategies([]);
             handleStepComplete(2);
-        } catch (error) {
-            console.error('Error in Step 2:', error);
+        } catch {
+            toast.error('Failed to apply portfolio algorithm');
         }
     };
 
     const handleStep3Submit = async () => {
         if (!portfolioId) return;
         try {
-            await portfolioAPI.choosePortfolio(portfolioId,selectedStrategies);
+            await portfolioAPI.choosePortfolio(portfolioId, selectedStrategies);
             handleStepComplete(3);
-        } catch (error) {
-            console.error('Error in Step 3:', error);
+        } catch {
+            toast.error('Failed to confirm strategy selection');
         }
     };
 
@@ -107,20 +109,41 @@ export default function PortfolioManagement() {
         if (!portfolioId) return;
         try {
             if (workflowMode !== 'manual') {
-
                 const final = selectedStrategies.map(() => 1);
                 setWeights(final);
                 await portfolioAPI.seedPortfolio(portfolioId, final);
-            }
-            else {
+            } else {
                 await portfolioAPI.seedPortfolio(portfolioId, weights);
             }
             handleStepComplete(4);
-        } catch (error) {
-            console.error('Error in Step 4:', error);
+        } catch {
+            toast.error('Failed to set weights');
         }
     };
 
+
+    // Step 5 state
+    const [rebalMethod, setRebalMethod] = useState('score_weighted');
+    const [rebalIntervalDays, setRebalIntervalDays] = useState(21);
+    const [rebalThreshold, setRebalThreshold] = useState(5);
+
+    const handleStep5Submit = async () => {
+        if (!portfolioId) return;
+        try {
+            await portfolioAPI.createReconcileJob(
+                portfolioId,
+                rebalIntervalDays * 24 * 60 * 60,
+                rebalMethod,
+                rebalThreshold / 100,
+                true,
+            );
+            handleStepComplete(5);
+            toast.success('Portfolio created successfully');
+            router.push(`/portfolios/${portfolioId}`);
+        } catch {
+            toast.error('Failed to create rebalancing job');
+        }
+    };
 
     const toggleStrategy = useCallback((strategyId: string) => {
         setSelectedStrategies(prev =>
@@ -141,25 +164,29 @@ export default function PortfolioManagement() {
         <div className="min-h-screen bg-gray-50">
             {/* Header */}
             <div className="bg-white border-b px-6 py-4">
-                <div className="flex items-center justify-between max-w-6xl mx-auto">
-                    <div>
-                        <div className="flex items-center gap-3 mb-2">
-                            <div className="p-2 bg-blue-100 rounded">
-                                <Sliders className="w-5 h-5 text-blue-600" />
-                            </div>
-                            <h1 className="text-2xl font-bold">Portfolio Management</h1>
+                <div className="flex items-center justify-between max-w-4xl mx-auto">
+                    <div className="flex items-center gap-4">
+                        <button
+                            onClick={() => router.push('/portfolios')}
+                            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors"
+                        >
+                            <ArrowLeft className="w-4 h-4" />
+                            Back
+                        </button>
+                        <div>
+                            <h1 className="text-xl font-bold">New Portfolio</h1>
+                            <p className="text-sm text-gray-500">Build a meta-portfolio in 5 steps</p>
                         </div>
-                        <p className="text-gray-600">Build and manage meta-portfolios with AI assistance</p>
                     </div>
                     <div className="flex items-center gap-3">
-                        <span className="text-sm text-gray-600">Workflow Mode:</span>
+                        <span className="text-sm text-gray-500">Mode:</span>
                         <button
                             onClick={() => setWorkflowMode(prev => prev === 'manual' ? 'automatic' : 'manual')}
-                            className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+                            className="flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-sm"
                         >
-                            <Settings className="w-4 h-4" />
-                            <span className="font-medium">{workflowMode === 'manual' ? 'Manual' : 'Automatic'}</span>
-                            <ChevronDown className="w-4 h-4" />
+                            <Settings className="w-3.5 h-3.5" />
+                            <span className="font-medium">{workflowMode === 'manual' ? 'Manual' : 'AI-Assisted'}</span>
+                            <ChevronDown className="w-3.5 h-3.5" />
                         </button>
                     </div>
                 </div>
@@ -346,8 +373,8 @@ export default function PortfolioManagement() {
                     {/* Step 5 */}
                     <StepCard
                         number={5}
-                        title="Step 5: Rebalancing Strategy"
-                        subtitle="Configure live portfolio rebalancing"
+                        title="Step 5: Rebalancing Schedule"
+                        subtitle="Configure automatic rebalancing for this portfolio"
                         icon={RefreshCw}
                         isActive={currentStep === 5}
                         isCompleted={stepStatus[5] === 'completed'}
@@ -355,13 +382,50 @@ export default function PortfolioManagement() {
                         onStepClick={handleStepClick}
                     >
                         <div className="mt-4 space-y-3">
-                            <p className="text-sm text-gray-600">Configure automatic rebalancing rules</p>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="text-xs text-gray-500 mb-1 block">Allocation Method</label>
+                                    <select
+                                        value={rebalMethod}
+                                        onChange={e => setRebalMethod(e.target.value)}
+                                        className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    >
+                                        <option value="score_weighted">Score Weighted</option>
+                                        <option value="equal_weight">Equal Weight</option>
+                                        <option value="manual">Manual</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="text-xs text-gray-500 mb-1 block">Interval (trading days)</label>
+                                    <input
+                                        type="number"
+                                        min={1}
+                                        value={rebalIntervalDays}
+                                        onChange={e => setRebalIntervalDays(parseInt(e.target.value) || 21)}
+                                        className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="text-xs text-gray-500 mb-1 block">Rebalance Threshold (%)</label>
+                                <input
+                                    type="number"
+                                    min={0}
+                                    max={100}
+                                    step={0.5}
+                                    value={rebalThreshold}
+                                    onChange={e => setRebalThreshold(parseFloat(e.target.value) || 5)}
+                                    className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                />
+                                <p className="text-xs text-gray-400 mt-1">Only rebalance if drift exceeds this threshold</p>
+                            </div>
                             <button
-                                onClick={() => router.push(`/portfolios/${portfolioId}`)}
+                                onClick={handleStep5Submit}
                                 disabled={!portfolioId}
-                                className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                                className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                             >
-                                Complete Setup
+                                <Play className="w-4 h-4" />
+                                Create Portfolio
                             </button>
                         </div>
                     </StepCard>

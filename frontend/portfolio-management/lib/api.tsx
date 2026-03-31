@@ -13,14 +13,16 @@ export interface Portfolio {
     name: string;
     created_at: string;
     strategy_count: number;
+    strategy_names: string[];
     total_value: number;
     return_percentage: number;
+    live: boolean;
 }
 
 export interface Portfolios extends Array<Portfolio> {}
 
 interface StrategyPrice { id: string; name: string; weight: number }
-interface PerformancePoint { date: string; portfolio: number; [key: string]: number | string }
+interface PerformancePoint { date: string; portfolio: number; equalWeight: number; [key: string]: number | string }
 
 export interface PortfolioPrice {
     id: number;
@@ -29,6 +31,52 @@ export interface PortfolioPrice {
     strategies: StrategyPrice[];
     performance: PerformancePoint[];
     topStrategyNames: string[];
+}
+
+export interface AdminStrategy {
+    strategy_id: string;
+    name: string;
+    description: string;
+    category: string;
+}
+
+export interface ReconcileJob {
+    job_id: number;
+    portfolio_id: number;
+    interval_seconds: number;
+    method: string;
+    threshold: number;
+    apply: boolean;
+    execute_trades: boolean;
+    dry_run_trades: boolean;
+    enabled: boolean;
+    next_run_at: string | null;
+    last_run_at: string | null;
+    last_status: string | null;
+    last_error: string | null;
+}
+
+export interface AllocationSnapshot {
+    id: number;
+    portfolio_id: number;
+    method: string;
+    strategies: string[];
+    raw_weights: number[];
+    target_weights: number[];
+    created_at: string;
+}
+
+export interface RebalanceSnapshot {
+    id: number;
+    portfolio_id: number;
+    method: string;
+    threshold: number;
+    strategies: string[];
+    current_weights: number[];
+    target_weights: number[];
+    trade_weights: number[];
+    status: string | null;
+    created_at: string;
 }
 
 export interface BacktestResult {
@@ -61,79 +109,9 @@ export const portfolioAPI = {
     },
 
     getPortfolios: async (): Promise<Portfolios> => {
-        const response = await fetch(`${API_BASE_URL}/portfolios`, {
-            method: 'GET',
-            headers: { 'Content-Type': 'application/json' },
-        });
+        const response = await fetch(`${API_BASE_URL}/portfolios/summary`);
         if (!response.ok) throw new Error('Failed to fetch portfolios');
-        const portfolios = (await response.json()).portfolios;
-
-        return await Promise.all(
-            portfolios.map(async (port: any) => {
-                const strats: string[] = port.strategies ?? [];
-                const weights: number[] = port.weights ?? [];
-
-                if (strats.length === 0 || weights.length !== strats.length) {
-                    return {
-                        id: port.portfolio_id,
-                        name: port.portfolio_name,
-                        created_at: port.date ?? new Date().toISOString().split('T')[0],
-                        strategy_count: strats.length,
-                        total_value: 0,
-                        return_percentage: 0,
-                    };
-                }
-
-                // Fetch strategy details in parallel.
-                const strategyDetails = await Promise.all(
-                    strats.map((strategy_id: string) =>
-                        fetch(`${API_BASE_URL}/strategy`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ strategy_id }),
-                        }).then(res => res.ok ? res.json() : null)
-                    )
-                );
-
-                const validDetails = strategyDetails.filter(Boolean);
-                if (validDetails.length === 0) {
-                    return {
-                        id: port.portfolio_id,
-                        name: port.portfolio_name,
-                        created_at: port.date ?? new Date().toISOString().split('T')[0],
-                        strategy_count: strats.length,
-                        total_value: 0,
-                        return_percentage: 0,
-                    };
-                }
-
-                // Use the full price history to compute initial and current portfolio value.
-                let initial_value = 0;
-                let total_value = 0;
-                validDetails.forEach((strat: any, index: number) => {
-                    const prices: number[] = strat.prices ?? [];
-                    const weight = weights[index] ?? 0;
-                    if (prices.length > 0) {
-                        initial_value += prices[0] * weight;
-                        total_value += prices[prices.length - 1] * weight;
-                    }
-                });
-
-                const return_percentage =
-                    initial_value > 0
-                        ? ((total_value - initial_value) / initial_value) * 100
-                        : 0;
-
-                return {
-                    id: port.portfolio_id,
-                    name: port.portfolio_name,
-                    created_at: port.date ?? new Date().toISOString().split('T')[0],
-                    strategy_count: strats.length,
-                    total_value: Math.round(total_value),
-                    return_percentage,
-                };
-            })
-        );
+        return response.json();
     },
 
     getPortfolioDetails: async (pid: string): Promise<PortfolioPrice> => {
@@ -183,7 +161,10 @@ export const portfolioAPI = {
             dates.length > 0 ? dates.length : Infinity
         );
 
-        const performance: PerformancePoint[] = Array.from({ length: numPoints }, (_, i) => {
+        // Count strategies with price data for equal-weight benchmark
+        const validStratCount = strategyDetails.filter((sd: any) => (sd?.prices?.length ?? 0) > 0).length;
+
+        const rawPerformance = Array.from({ length: numPoints }, (_, i) => {
             const date = dates[i] ?? `Day ${i + 1}`;
 
             const portfolioValue = strategyDetails.reduce(
@@ -192,19 +173,38 @@ export const portfolioAPI = {
                 0
             );
 
-            const point: PerformancePoint = { date, portfolio: portfolioValue };
-            top3.forEach((s, j) => {
+            const equalWeightValue = validStratCount > 0
+                ? strategyDetails.reduce((sum: number, strat: any) => sum + (strat?.prices?.[i] ?? 0), 0) / validStratCount
+                : 0;
+
+            const point: any = { date, portfolio: portfolioValue, equalWeight: equalWeightValue };
+            top3.forEach((_, j) => {
                 point[`strategy${j + 1}`] = top3Details[j]?.prices?.[i] ?? 0;
             });
             return point;
         });
 
-        const firstPortfolio = performance[0]?.portfolio ?? 0;
-        const lastPortfolio = performance[performance.length - 1]?.portfolio ?? 0;
-        const total_return =
-            firstPortfolio > 0
-                ? ((lastPortfolio - firstPortfolio) / firstPortfolio) * 100
-                : 0;
+        // Normalize all series to index 100 from the first data point
+        const norm = (val: number, base: number) => (base > 0 ? (val / base) * 100 : 100);
+        const base = rawPerformance[0] ?? {};
+        const basePortfolio = (base.portfolio as number) ?? 0;
+        const baseEqualWeight = (base.equalWeight as number) ?? 0;
+        const baseTop3 = top3.map((_, j) => (base[`strategy${j + 1}`] as number) ?? 0);
+
+        const performance: PerformancePoint[] = rawPerformance.map(point => {
+            const normalized: PerformancePoint = {
+                date: point.date,
+                portfolio: norm(point.portfolio, basePortfolio),
+                equalWeight: norm(point.equalWeight, baseEqualWeight),
+            };
+            top3.forEach((_, j) => {
+                normalized[`strategy${j + 1}`] = norm(point[`strategy${j + 1}`], baseTop3[j]);
+            });
+            return normalized;
+        });
+
+        const lastPortfolio = performance[performance.length - 1]?.portfolio ?? 100;
+        const total_return = lastPortfolio - 100;
 
         return {
             id: portfolio_id,
@@ -307,5 +307,174 @@ export const portfolioAPI = {
             body: JSON.stringify({ portfolio_id, weights: normalizedWeights }),
         });
         if (!response.ok) throw new Error('Failed to seed portfolio');
+    },
+
+    // -------------------------------------------------------------------------
+    // Admin: portfolio management
+    // -------------------------------------------------------------------------
+
+    updatePortfolio: async (portfolio_id: number, portfolio_name?: string, account?: string): Promise<void> => {
+        const apiKey = process.env.NEXT_PUBLIC_ADMIN_API_KEY ?? '';
+        const body: any = {};
+        if (portfolio_name !== undefined) body.portfolio_name = portfolio_name;
+        if (account !== undefined) body.account = account;
+        const response = await fetch(`${API_BASE_URL}/admin/portfolios/${portfolio_id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
+            body: JSON.stringify(body),
+        });
+        if (!response.ok) throw new Error('Failed to update portfolio');
+    },
+
+    deletePortfolio: async (portfolio_id: number): Promise<void> => {
+        const apiKey = process.env.NEXT_PUBLIC_ADMIN_API_KEY ?? '';
+        const response = await fetch(`${API_BASE_URL}/admin/portfolios/${portfolio_id}`, {
+            method: 'DELETE',
+            headers: { 'X-API-Key': apiKey },
+        });
+        if (!response.ok) throw new Error('Failed to delete portfolio');
+    },
+
+    getAllocationHistory: async (portfolio_id: number): Promise<AllocationSnapshot[]> => {
+        const apiKey = process.env.NEXT_PUBLIC_ADMIN_API_KEY ?? '';
+        const response = await fetch(`${API_BASE_URL}/admin/portfolios/${portfolio_id}/allocation-history`, {
+            headers: { 'X-API-Key': apiKey },
+        });
+        if (!response.ok) throw new Error('Failed to fetch allocation history');
+        return response.json();
+    },
+
+    getRebalanceHistory: async (portfolio_id: number): Promise<RebalanceSnapshot[]> => {
+        const apiKey = process.env.NEXT_PUBLIC_ADMIN_API_KEY ?? '';
+        const response = await fetch(`${API_BASE_URL}/admin/portfolios/${portfolio_id}/rebalance-history`, {
+            headers: { 'X-API-Key': apiKey },
+        });
+        if (!response.ok) throw new Error('Failed to fetch rebalance history');
+        return response.json();
+    },
+
+    // -------------------------------------------------------------------------
+    // Admin: strategy management
+    // -------------------------------------------------------------------------
+
+    adminGetStrategies: async (): Promise<AdminStrategy[]> => {
+        const apiKey = process.env.NEXT_PUBLIC_ADMIN_API_KEY ?? '';
+        const response = await fetch(`${API_BASE_URL}/strategies`, {
+            headers: { 'X-API-Key': apiKey },
+        });
+        if (!response.ok) throw new Error('Failed to fetch strategies');
+        return (await response.json()).strategies;
+    },
+
+    upsertStrategy: async (strategy_id: string, name: string, description: string, category: string): Promise<AdminStrategy> => {
+        const apiKey = process.env.NEXT_PUBLIC_ADMIN_API_KEY ?? '';
+        const response = await fetch(`${API_BASE_URL}/admin/strategies`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
+            body: JSON.stringify({ strategy_id, name, description, category }),
+        });
+        if (!response.ok) throw new Error('Failed to upsert strategy');
+        return response.json();
+    },
+
+    deleteStrategy: async (strategy_id: string): Promise<void> => {
+        const apiKey = process.env.NEXT_PUBLIC_ADMIN_API_KEY ?? '';
+        const response = await fetch(`${API_BASE_URL}/admin/strategies/${strategy_id}`, {
+            method: 'DELETE',
+            headers: { 'X-API-Key': apiKey },
+        });
+        if (!response.ok) throw new Error('Failed to delete strategy');
+    },
+
+    // -------------------------------------------------------------------------
+    // Admin: reconcile jobs
+    // -------------------------------------------------------------------------
+
+    listReconcileJobs: async (): Promise<ReconcileJob[]> => {
+        const apiKey = process.env.NEXT_PUBLIC_ADMIN_API_KEY ?? '';
+        const response = await fetch(`${API_BASE_URL}/admin/reconcile/jobs`, {
+            headers: { 'X-API-Key': apiKey },
+        });
+        if (!response.ok) throw new Error('Failed to list reconcile jobs');
+        return response.json();
+    },
+
+    createReconcileJob: async (
+        portfolio_id: number,
+        interval_seconds: number,
+        method: string,
+        threshold: number,
+        apply: boolean,
+    ): Promise<ReconcileJob> => {
+        const apiKey = process.env.NEXT_PUBLIC_ADMIN_API_KEY ?? '';
+        const response = await fetch(`${API_BASE_URL}/admin/reconcile/jobs`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
+            body: JSON.stringify({ portfolio_id, interval_seconds, method, threshold, apply }),
+        });
+        if (!response.ok) throw new Error('Failed to create reconcile job');
+        return response.json();
+    },
+
+    runReconcileJob: async (job_id: number): Promise<void> => {
+        const apiKey = process.env.NEXT_PUBLIC_ADMIN_API_KEY ?? '';
+        const response = await fetch(`${API_BASE_URL}/admin/reconcile/jobs/${job_id}/run`, {
+            method: 'POST',
+            headers: { 'X-API-Key': apiKey },
+        });
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error((err as any).detail ?? 'Failed to run reconcile job');
+        }
+    },
+
+    setReconcileJobEnabled: async (job_id: number, enabled: boolean): Promise<void> => {
+        const apiKey = process.env.NEXT_PUBLIC_ADMIN_API_KEY ?? '';
+        const response = await fetch(`${API_BASE_URL}/admin/reconcile/jobs/${job_id}/enabled`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
+            body: JSON.stringify({ enabled }),
+        });
+        if (!response.ok) throw new Error('Failed to update job');
+    },
+
+    deleteReconcileJob: async (job_id: number): Promise<void> => {
+        const apiKey = process.env.NEXT_PUBLIC_ADMIN_API_KEY ?? '';
+        const response = await fetch(`${API_BASE_URL}/admin/reconcile/jobs/${job_id}`, {
+            method: 'DELETE',
+            headers: { 'X-API-Key': apiKey },
+        });
+        if (!response.ok) throw new Error('Failed to delete reconcile job');
+    },
+
+    // -------------------------------------------------------------------------
+    // Admin: scheduler
+    // -------------------------------------------------------------------------
+
+    getSchedulerStatus: async (): Promise<{ enabled_by_config: boolean; running: boolean; poll_interval_seconds: number; next_poll_at: string | null }> => {
+        const apiKey = process.env.NEXT_PUBLIC_ADMIN_API_KEY ?? '';
+        const response = await fetch(`${API_BASE_URL}/admin/reconcile/scheduler/status`, {
+            headers: { 'X-API-Key': apiKey },
+        });
+        if (!response.ok) throw new Error('Failed to get scheduler status');
+        return response.json();
+    },
+
+    startScheduler: async (): Promise<void> => {
+        const apiKey = process.env.NEXT_PUBLIC_ADMIN_API_KEY ?? '';
+        const response = await fetch(`${API_BASE_URL}/admin/reconcile/scheduler/start`, {
+            method: 'POST',
+            headers: { 'X-API-Key': apiKey },
+        });
+        if (!response.ok) throw new Error('Failed to start scheduler');
+    },
+
+    stopScheduler: async (): Promise<void> => {
+        const apiKey = process.env.NEXT_PUBLIC_ADMIN_API_KEY ?? '';
+        const response = await fetch(`${API_BASE_URL}/admin/reconcile/scheduler/stop`, {
+            method: 'POST',
+            headers: { 'X-API-Key': apiKey },
+        });
+        if (!response.ok) throw new Error('Failed to stop scheduler');
     },
 };
