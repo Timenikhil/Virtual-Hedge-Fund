@@ -8,6 +8,9 @@ from pydantic import BaseModel, Field
 
 from vhf.db.operations import (
     bulk_upsert_strategies,
+    get_backtest_result,
+    list_backtest_results,
+    save_backtest_result,
     create_reconcile_job,
     delete_portfolio,
     delete_reconcile_job,
@@ -482,15 +485,23 @@ def api_rebalance_history(
 def api_backtest(request: BacktestRequest):
     """
     Run a historical backtest for a portfolio using stored price data.
-
-    Supports equal_weight, score_weighted (momentum), and manual allocation methods.
-    ai_weighted falls back to score_weighted during backtesting to avoid
-    calling Claude once per rebalance date.
-
-    Returns performance metrics (total return, annualised return, Sharpe ratio,
-    max drawdown) and a daily portfolio value series.
+    The result is automatically persisted and retrievable via GET /backtest/{portfolio_id}/runs.
     """
     try:
-        return run_backtest(request)
+        result = run_backtest(request)
     except BacktestError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    save_backtest_result(result, request.rebalance_frequency_days)
+    return result
+
+
+@router.get("/backtest/{portfolio_id}/runs")
+def api_list_backtest_runs(portfolio_id: int):
+    """List saved backtest runs for a portfolio, newest first (summaries only)."""
+    return list_backtest_results(portfolio_id)
+
+
+@router.get("/backtest/{portfolio_id}/runs/{run_id}")
+def api_get_backtest_run(portfolio_id: int, run_id: int):
+    """Retrieve the full BacktestResult for a saved run."""
+    return get_backtest_result(run_id)

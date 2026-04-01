@@ -1326,3 +1326,102 @@ def get_rebalance_history(portfolio_id: int, limit: int = 50) -> list[dict[str, 
             "created_at": row[11],
         })
     return result
+
+
+# ---------------------------------------------------------------------------
+# Backtest result persistence
+# ---------------------------------------------------------------------------
+
+def save_backtest_result(result: Any, rebalance_frequency_days: int) -> int:
+    """
+    Persist a BacktestResult to the DB.  Returns the new row ID.
+    ``result`` is a BacktestResult instance; importing here avoids a circular import.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    result_json = result.model_dump_json()
+    with connection.db_lock:
+        connection.connect()
+        with closing(connection.client.cursor()) as cursor:
+            cursor.execute(
+                """
+                INSERT INTO backtest_results
+                    (PID, METHOD, START_DATE, END_DATE, REBALANCE_FREQUENCY_DAYS,
+                     INITIAL_VALUE, RESULT_JSON, CREATED_AT)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    result.portfolio_id,
+                    result.method,
+                    result.start_date,
+                    result.end_date,
+                    rebalance_frequency_days,
+                    result.initial_value,
+                    result_json,
+                    now,
+                ),
+            )
+            row_id = cursor.lastrowid
+            connection.client.commit()
+    return row_id
+
+
+def list_backtest_results(portfolio_id: int) -> list[dict]:
+    """Return summary rows for a portfolio, newest first. Full result excluded for speed."""
+    with connection.db_lock:
+        connection.connect()
+        with closing(connection.client.cursor()) as cursor:
+            cursor.execute(
+                """
+                SELECT ID, PID, METHOD, START_DATE, END_DATE,
+                       REBALANCE_FREQUENCY_DAYS, INITIAL_VALUE, CREATED_AT,
+                       JSON_EXTRACT(RESULT_JSON, '$.total_return_pct')       AS total_return_pct,
+                       JSON_EXTRACT(RESULT_JSON, '$.annualised_return_pct')  AS annualised_return_pct,
+                       JSON_EXTRACT(RESULT_JSON, '$.sharpe_ratio')           AS sharpe_ratio,
+                       JSON_EXTRACT(RESULT_JSON, '$.max_drawdown_pct')       AS max_drawdown_pct,
+                       JSON_EXTRACT(RESULT_JSON, '$.n_trading_days')         AS n_trading_days,
+                       JSON_EXTRACT(RESULT_JSON, '$.n_rebalances')           AS n_rebalances,
+                       JSON_EXTRACT(RESULT_JSON, '$.final_value')            AS final_value
+                FROM backtest_results
+                WHERE PID = ?
+                ORDER BY CREATED_AT DESC
+                LIMIT 50
+                """,
+                (portfolio_id,),
+            )
+            rows = cursor.fetchall()
+
+    result = []
+    for row in rows:
+        result.append({
+            "id": int(row[0]),
+            "portfolio_id": int(row[1]),
+            "method": row[2],
+            "start_date": row[3],
+            "end_date": row[4],
+            "rebalance_frequency_days": int(row[5]),
+            "initial_value": float(row[6]),
+            "created_at": row[7],
+            "total_return_pct": float(row[8]) if row[8] is not None else None,
+            "annualised_return_pct": float(row[9]) if row[9] is not None else None,
+            "sharpe_ratio": float(row[10]) if row[10] is not None else None,
+            "max_drawdown_pct": float(row[11]) if row[11] is not None else None,
+            "n_trading_days": int(row[12]) if row[12] is not None else None,
+            "n_rebalances": int(row[13]) if row[13] is not None else None,
+            "final_value": float(row[14]) if row[14] is not None else None,
+        })
+    return result
+
+
+def get_backtest_result(run_id: int) -> dict:
+    """Return the full persisted BacktestResult JSON for a single run."""
+    with connection.db_lock:
+        connection.connect()
+        with closing(connection.client.cursor()) as cursor:
+            cursor.execute(
+                "SELECT RESULT_JSON FROM backtest_results WHERE ID = ?",
+                (run_id,),
+            )
+            row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Backtest run {run_id} not found")
+    return json.loads(row[0])

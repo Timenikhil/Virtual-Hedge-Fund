@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
-import { ArrowLeft, Play, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Play, AlertTriangle, Clock } from 'lucide-react';
 import {
     ComposedChart,
     Line,
@@ -14,7 +14,7 @@ import {
     Legend,
     ResponsiveContainer,
 } from 'recharts';
-import { portfolioAPI, BacktestResult } from '@/lib/api';
+import { portfolioAPI, BacktestResult, BacktestRunSummary } from '@/lib/api';
 
 const METHODS = [
     { value: 'equal_weight', label: 'Equal Weight' },
@@ -63,6 +63,12 @@ export default function BacktestPage() {
     const [loading, setLoading] = useState(false);
     const [result, setResult] = useState<BacktestResult | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [pastRuns, setPastRuns] = useState<BacktestRunSummary[]>([]);
+    const [loadingRun, setLoadingRun] = useState<number | null>(null);
+
+    useEffect(() => {
+        portfolioAPI.listBacktestRuns(portfolioId).then(setPastRuns).catch(() => {});
+    }, [portfolioId]);
 
     const runBacktest = async () => {
         setLoading(true);
@@ -79,10 +85,25 @@ export default function BacktestPage() {
                 liveAi,
             );
             setResult(data);
+            // Refresh past runs list
+            portfolioAPI.listBacktestRuns(portfolioId).then(setPastRuns).catch(() => {});
         } catch (e: any) {
             setError(e.message ?? 'Backtest failed');
         } finally {
             setLoading(false);
+        }
+    };
+
+    const loadRun = async (runId: number) => {
+        setLoadingRun(runId);
+        setError(null);
+        try {
+            const data = await portfolioAPI.getBacktestRun(portfolioId, runId);
+            setResult(data);
+        } catch (e: any) {
+            setError(e.message ?? 'Failed to load run');
+        } finally {
+            setLoadingRun(null);
         }
     };
 
@@ -226,6 +247,64 @@ export default function BacktestPage() {
                             {loading ? 'Running…' : 'Run Backtest'}
                         </button>
                     </div>
+
+                    {/* Past runs */}
+                    {pastRuns.length > 0 && (
+                        <div className="bg-white rounded-lg border p-6 mb-8">
+                            <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+                                <Clock className="w-5 h-5 text-gray-400" />
+                                Past Runs
+                            </h2>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm">
+                                    <thead>
+                                        <tr className="border-b text-left text-gray-500">
+                                            <th className="pb-2 font-medium">Run at</th>
+                                            <th className="pb-2 font-medium">Method</th>
+                                            <th className="pb-2 font-medium">Period</th>
+                                            <th className="pb-2 font-medium text-right">Return</th>
+                                            <th className="pb-2 font-medium text-right">Sharpe</th>
+                                            <th className="pb-2 font-medium text-right">Max DD</th>
+                                            <th className="pb-2 font-medium"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {pastRuns.map(run => (
+                                            <tr key={run.id} className="border-b last:border-0">
+                                                <td className="py-2 text-gray-500 text-xs">
+                                                    {new Date(run.created_at).toLocaleString()}
+                                                </td>
+                                                <td className="py-2 font-mono text-xs">{run.method}</td>
+                                                <td className="py-2 text-xs text-gray-600">
+                                                    {run.start_date} → {run.end_date}
+                                                </td>
+                                                <td className={`py-2 text-right font-medium ${(run.total_return_pct ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                                    {run.total_return_pct != null
+                                                        ? `${run.total_return_pct >= 0 ? '+' : ''}${run.total_return_pct.toFixed(2)}%`
+                                                        : '—'}
+                                                </td>
+                                                <td className="py-2 text-right">
+                                                    {run.sharpe_ratio != null ? run.sharpe_ratio.toFixed(3) : '—'}
+                                                </td>
+                                                <td className="py-2 text-right text-red-600">
+                                                    {run.max_drawdown_pct != null ? `${run.max_drawdown_pct.toFixed(2)}%` : '—'}
+                                                </td>
+                                                <td className="py-2 text-right">
+                                                    <button
+                                                        onClick={() => loadRun(run.id)}
+                                                        disabled={loadingRun === run.id}
+                                                        className="text-indigo-600 hover:text-indigo-800 text-xs font-medium disabled:opacity-50"
+                                                    >
+                                                        {loadingRun === run.id ? 'Loading…' : 'Load'}
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    )}
 
                     {/* Error */}
                     {error && (

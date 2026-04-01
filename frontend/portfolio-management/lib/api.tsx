@@ -80,6 +80,24 @@ export interface RebalanceSnapshot {
     created_at: string;
 }
 
+export interface BacktestRunSummary {
+    id: number;
+    portfolio_id: number;
+    method: string;
+    start_date: string;
+    end_date: string;
+    rebalance_frequency_days: number;
+    initial_value: number;
+    final_value: number | null;
+    total_return_pct: number | null;
+    annualised_return_pct: number | null;
+    sharpe_ratio: number | null;
+    max_drawdown_pct: number | null;
+    n_trading_days: number | null;
+    n_rebalances: number | null;
+    created_at: string;
+}
+
 export interface BacktestResult {
     portfolio_id: number;
     method: string;
@@ -249,6 +267,24 @@ export const portfolioAPI = {
             const err = await response.json().catch(() => ({}));
             throw new Error((err as any).detail ?? 'Backtest failed');
         }
+        return response.json();
+    },
+
+    listBacktestRuns: async (portfolioId: number): Promise<BacktestRunSummary[]> => {
+        const apiKey = process.env.NEXT_PUBLIC_ADMIN_API_KEY ?? '';
+        const response = await fetch(`${API_BASE_URL}/admin/backtest/${portfolioId}/runs`, {
+            headers: { 'X-API-Key': apiKey },
+        });
+        if (!response.ok) throw new Error('Failed to fetch backtest runs');
+        return response.json();
+    },
+
+    getBacktestRun: async (portfolioId: number, runId: number): Promise<BacktestResult> => {
+        const apiKey = process.env.NEXT_PUBLIC_ADMIN_API_KEY ?? '';
+        const response = await fetch(`${API_BASE_URL}/admin/backtest/${portfolioId}/runs/${runId}`, {
+            headers: { 'X-API-Key': apiKey },
+        });
+        if (!response.ok) throw new Error('Failed to fetch backtest run');
         return response.json();
     },
 

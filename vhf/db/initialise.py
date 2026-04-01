@@ -126,6 +126,28 @@ def initialiseDB():
                 """
             )
 
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS backtest_results (
+                    ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                    PID INTEGER NOT NULL,
+                    METHOD TEXT NOT NULL,
+                    START_DATE TEXT NOT NULL,
+                    END_DATE TEXT NOT NULL,
+                    REBALANCE_FREQUENCY_DAYS INTEGER NOT NULL,
+                    INITIAL_VALUE REAL NOT NULL,
+                    RESULT_JSON TEXT NOT NULL,
+                    CREATED_AT TEXT NOT NULL
+                );
+                """
+            )
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_backtest_results_pid
+                ON backtest_results (PID, CREATED_AT DESC);
+                """
+            )
+
             # Backward-compatible schema evolution for existing DBs.
             _ensure_column(cursor, "strategies", "SOURCE", "TEXT NOT NULL DEFAULT 'local'")
             _ensure_column(cursor, "reconcile_jobs", "AI_PROVIDER_MODE", "TEXT")
