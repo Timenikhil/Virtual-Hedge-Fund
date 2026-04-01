@@ -55,7 +55,7 @@ export default function BacktestPage() {
     const portfolioId = parseInt(params.id as string, 10);
 
     const [method, setMethod] = useState('equal_weight');
-    const [rebalanceDays, setRebalanceDays] = useState(30);
+    const [rebalanceDays, setRebalanceDays] = useState(21);
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
     const [initialValue, setInitialValue] = useState(100);
