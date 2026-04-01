@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
-import { ArrowLeft, Play, TrendingUp, TrendingDown, Activity, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Play, AlertTriangle } from 'lucide-react';
 import {
     ComposedChart,
     Line,
@@ -90,6 +90,17 @@ export default function BacktestPage() {
         date,
         value: Math.round(value * 100) / 100,
     }));
+
+    // Weight evolution: one data point per rebalance snapshot, one key per strategy
+    const weightChartData = result?.rebalance_history.map(snap => {
+        const point: Record<string, string | number> = { date: snap.date };
+        for (const [sid, w] of Object.entries(snap.weights)) {
+            point[sid] = Math.round(w * 10000) / 100; // → percent, 2dp
+        }
+        return point;
+    });
+    const strategyIds = result ? Object.keys(result.rebalance_history[0]?.weights ?? {}) : [];
+    const CHART_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
 
     return (
         <ProtectedRoute>
@@ -366,6 +377,106 @@ export default function BacktestPage() {
                                     </tbody>
                                 </table>
                             </div>
+
+                            {/* Weight evolution chart — only meaningful with 2+ rebalances */}
+                            {result.rebalance_history.length >= 2 && (
+                                <div className="bg-white rounded-lg border p-6 mt-8">
+                                    <h2 className="text-xl font-semibold mb-4">Weight Evolution at Each Rebalance</h2>
+                                    <ResponsiveContainer width="100%" height={300}>
+                                        <ComposedChart data={weightChartData}>
+                                            <CartesianGrid strokeDasharray="3 3" />
+                                            <XAxis
+                                                dataKey="date"
+                                                tickFormatter={d =>
+                                                    new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                                                }
+                                                minTickGap={40}
+                                            />
+                                            <YAxis
+                                                tickFormatter={v => `${v}%`}
+                                                domain={[0, 100]}
+                                                width={50}
+                                            />
+                                            <Tooltip
+                                                formatter={(v: number) => `${v.toFixed(2)}%`}
+                                                labelFormatter={d => new Date(d).toLocaleDateString()}
+                                            />
+                                            <Legend />
+                                            {strategyIds.map((sid, i) => (
+                                                <Line
+                                                    key={sid}
+                                                    type="monotone"
+                                                    dataKey={sid}
+                                                    name={sid}
+                                                    stroke={CHART_COLORS[i % CHART_COLORS.length]}
+                                                    strokeWidth={2}
+                                                    dot={{ r: 3 }}
+                                                />
+                                            ))}
+                                        </ComposedChart>
+                                    </ResponsiveContainer>
+                                </div>
+                            )}
+
+                            {/* Rebalance log */}
+                            {result.rebalance_history.length > 0 && (
+                                <div className="bg-white rounded-lg border p-6 mt-8">
+                                    <h2 className="text-xl font-semibold mb-4">
+                                        Rebalance Log
+                                        <span className="ml-2 text-sm font-normal text-gray-400">
+                                            ({result.rebalance_history.length} snapshots incl. initial)
+                                        </span>
+                                    </h2>
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-sm">
+                                            <thead>
+                                                <tr className="border-b text-left text-gray-500">
+                                                    <th className="pb-2 font-medium">Date</th>
+                                                    <th className="pb-2 font-medium text-right">Portfolio Value</th>
+                                                    {strategyIds.map(sid => (
+                                                        <th key={sid} className="pb-2 font-medium text-right font-mono">
+                                                            {sid}
+                                                        </th>
+                                                    ))}
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {result.rebalance_history.map((snap, idx) => {
+                                                    const prev = idx > 0 ? result.rebalance_history[idx - 1] : null;
+                                                    return (
+                                                        <tr key={snap.date} className="border-b last:border-0">
+                                                            <td className="py-2 text-gray-700">
+                                                                {new Date(snap.date).toLocaleDateString()}
+                                                                {idx === 0 && (
+                                                                    <span className="ml-2 text-xs text-indigo-500 font-medium">initial</span>
+                                                                )}
+                                                            </td>
+                                                            <td className="py-2 text-right font-mono">
+                                                                ${snap.portfolio_value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                            </td>
+                                                            {strategyIds.map(sid => {
+                                                                const w = snap.weights[sid] ?? 0;
+                                                                const prevW = prev?.weights[sid] ?? w;
+                                                                const delta = w - prevW;
+                                                                return (
+                                                                    <td key={sid} className="py-2 text-right">
+                                                                        {(w * 100).toFixed(1)}%
+                                                                        {prev && Math.abs(delta) >= 0.001 && (
+                                                                            <span className={`ml-1 text-xs ${delta > 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                                                                {delta > 0 ? '+' : ''}{(delta * 100).toFixed(1)}pp
+                                                                            </span>
+                                                                        )}
+                                                                    </td>
+                                                                );
+                                                            })}
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
                         </>
                     )}
                 </div>

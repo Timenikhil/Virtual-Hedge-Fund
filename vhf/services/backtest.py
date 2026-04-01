@@ -52,6 +52,21 @@ class BacktestLeg(BaseModel):
     total_return_pct: float
 
 
+class RebalanceSnapshot(BaseModel):
+    """
+    Weight allocation captured at one rebalance point during the simulation.
+
+    Weights are keyed by strategy_id (not a bare list) so the data is
+    self-describing and independent of strategy ordering.
+
+    The first snapshot in rebalance_history is the initial allocation at
+    simulation start (day 0); subsequent snapshots are each scheduled rebalance.
+    """
+    date: str
+    portfolio_value: float
+    weights: dict[str, float]  # {strategy_id: normalised weight}
+
+
 class BacktestResult(BaseModel):
     portfolio_id: int
     method: str
@@ -67,6 +82,7 @@ class BacktestResult(BaseModel):
     max_drawdown_pct: float
     strategy_legs: list[BacktestLeg]
     daily_values: list[tuple[str, float]]  # (ISO date, portfolio value)
+    rebalance_history: list[RebalanceSnapshot]  # initial alloc + every rebalance
     # AI-specific metrics (None for non-AI methods or when live_ai_calls=False)
     ai_call_count: int | None = None
     ai_fallback_count: int | None = None
@@ -196,19 +212,19 @@ def _parse_ai_weights(response: Any, n: int) -> list[float]:
     raise ValueError(f"Cannot extract {n} non-negative weights from AI response: {response!r}")
 
 
-def _weight_stability(weight_history: list[list[float]]) -> float | None:
+def _weight_stability(rebalance_history: list[RebalanceSnapshot]) -> float | None:
     """
     Average per-strategy weight std dev across rebalances.
     Lower = more stable / consistent AI allocation decisions.
-    Returns None if fewer than 2 rebalances recorded.
+    Returns None if fewer than 2 snapshots recorded.
     """
-    if len(weight_history) < 2:
+    if len(rebalance_history) < 2:
         return None
-    n = len(weight_history[0])
-    stdevs = []
-    for j in range(n):
-        vals = [wh[j] for wh in weight_history]
-        stdevs.append(statistics.stdev(vals))
+    strategy_ids = list(rebalance_history[0].weights.keys())
+    stdevs = [
+        statistics.stdev([s.weights[sid] for s in rebalance_history])
+        for sid in strategy_ids
+    ]
     return round(statistics.mean(stdevs), 6) if stdevs else None
 
 
@@ -301,7 +317,7 @@ def run_backtest(request: BacktestRequest) -> BacktestResult:
 
     ai_call_count = 0
     ai_fallback_count = 0
-    weight_history: list[list[float]] = []
+    rebalance_history: list[RebalanceSnapshot] = []
 
     def _resolve_weights(
         prices_up_to: dict[str, list[float]],
@@ -326,6 +342,13 @@ def run_backtest(request: BacktestRequest) -> BacktestResult:
                 return _equal_weights(n)
         return _compute_weights(request.method, strategy_ids, prices_up_to, portfolio.weights)
 
+    def _snapshot(date: str, value: float, weights: list[float]) -> RebalanceSnapshot:
+        return RebalanceSnapshot(
+            date=date,
+            portfolio_value=round(value, 6),
+            weights={sid: round(w, 6) for sid, w in zip(strategy_ids, weights)},
+        )
+
     # ---------------------------------------------------------------------------
     # Simulation loop
     # ---------------------------------------------------------------------------
@@ -333,7 +356,7 @@ def run_backtest(request: BacktestRequest) -> BacktestResult:
     # Initialise: compute first weights at day 0 using only day-0 prices.
     initial_prices_up_to = {sid: [price_by_sid[sid][0]] for sid in strategy_ids}
     weights = _resolve_weights(initial_prices_up_to, _equal_weights(n))
-    weight_history.append(weights)
+    rebalance_history.append(_snapshot(actual_start, request.initial_value, weights))
 
     # Holdings = value allocated to each strategy.
     holdings = [w * request.initial_value for w in weights]
@@ -373,7 +396,7 @@ def run_backtest(request: BacktestRequest) -> BacktestResult:
                 for sid in strategy_ids
             }
             weights = _resolve_weights(prices_up_to, weights)
-            weight_history.append(weights)
+            rebalance_history.append(_snapshot(day_str, portfolio_value, weights))
             holdings = [w * portfolio_value for w in weights]
             n_rebalances += 1
             last_rebalance_idx = i
@@ -422,7 +445,8 @@ def run_backtest(request: BacktestRequest) -> BacktestResult:
         max_drawdown_pct=round(_max_drawdown(portfolio_vals), 4),
         strategy_legs=strategy_legs,
         daily_values=daily_values,
+        rebalance_history=rebalance_history,
         ai_call_count=ai_call_count if use_live_ai else None,
         ai_fallback_count=ai_fallback_count if use_live_ai else None,
-        weight_stability=_weight_stability(weight_history) if use_live_ai else None,
+        weight_stability=_weight_stability(rebalance_history) if use_live_ai else None,
     )

@@ -466,5 +466,90 @@ class AIWeightedBacktestTest(unittest.TestCase):
         ))
 
 
+    # ------------------------------------------------------------------
+    # rebalance_history tests
+    # ------------------------------------------------------------------
+
+    @patch("vhf.services.backtest.get_strategy_price_history_raw")
+    @patch("vhf.services.backtest.get_db_portfolio_id")
+    def test_rebalance_history_always_present(self, mock_portfolio, mock_history):
+        """rebalance_history is always populated, even for non-AI methods."""
+        mock_portfolio.return_value = _make_portfolio(["s1", "s2"])
+        mock_history.side_effect = lambda sid: _linear_prices(30)
+
+        result = run_backtest(BacktestRequest(
+            portfolio_id=1,
+            method=AllocationMethod.equal_weight,
+            rebalance_frequency_days=10,
+        ))
+
+        self.assertIsNotNone(result.rebalance_history)
+        self.assertGreaterEqual(len(result.rebalance_history), 1)
+
+    @patch("vhf.services.backtest.get_strategy_price_history_raw")
+    @patch("vhf.services.backtest.get_db_portfolio_id")
+    def test_rebalance_history_count(self, mock_portfolio, mock_history):
+        """rebalance_history has n_rebalances + 1 entries (initial + each rebalance)."""
+        mock_portfolio.return_value = _make_portfolio(["s1", "s2"])
+        mock_history.side_effect = lambda sid: _linear_prices(50)
+
+        result = run_backtest(BacktestRequest(
+            portfolio_id=1,
+            method=AllocationMethod.equal_weight,
+            rebalance_frequency_days=10,
+        ))
+
+        self.assertEqual(len(result.rebalance_history), result.n_rebalances + 1)
+
+    @patch("vhf.services.backtest.get_strategy_price_history_raw")
+    @patch("vhf.services.backtest.get_db_portfolio_id")
+    def test_rebalance_history_weights_sum_to_one(self, mock_portfolio, mock_history):
+        """Each rebalance snapshot's weights sum to ~1.0."""
+        mock_portfolio.return_value = _make_portfolio(["s1", "s2", "s3"])
+        mock_history.side_effect = lambda sid: _linear_prices(40)
+
+        result = run_backtest(BacktestRequest(
+            portfolio_id=1,
+            method=AllocationMethod.equal_weight,
+            rebalance_frequency_days=10,
+        ))
+
+        for snap in result.rebalance_history:
+            total = sum(snap.weights.values())
+            self.assertAlmostEqual(total, 1.0, places=5)
+
+    @patch("vhf.services.backtest.get_strategy_price_history_raw")
+    @patch("vhf.services.backtest.get_db_portfolio_id")
+    def test_rebalance_history_keyed_by_strategy_id(self, mock_portfolio, mock_history):
+        """Weights dict is keyed by strategy_id, not bare indices."""
+        mock_portfolio.return_value = _make_portfolio(["alpha", "beta"])
+        mock_history.side_effect = lambda sid: _linear_prices(30)
+
+        result = run_backtest(BacktestRequest(
+            portfolio_id=1,
+            method=AllocationMethod.equal_weight,
+            rebalance_frequency_days=10,
+        ))
+
+        for snap in result.rebalance_history:
+            self.assertIn("alpha", snap.weights)
+            self.assertIn("beta", snap.weights)
+
+    @patch("vhf.services.backtest.get_strategy_price_history_raw")
+    @patch("vhf.services.backtest.get_db_portfolio_id")
+    def test_rebalance_history_first_snapshot_is_start_date(self, mock_portfolio, mock_history):
+        """First rebalance snapshot date equals the actual start date."""
+        mock_portfolio.return_value = _make_portfolio(["s1", "s2"])
+        mock_history.side_effect = lambda sid: _linear_prices(30)
+
+        result = run_backtest(BacktestRequest(
+            portfolio_id=1,
+            method=AllocationMethod.equal_weight,
+            rebalance_frequency_days=10,
+        ))
+
+        self.assertEqual(result.rebalance_history[0].date, result.start_date)
+
+
 if __name__ == "__main__":
     unittest.main()

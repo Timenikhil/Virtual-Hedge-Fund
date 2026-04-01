@@ -95,6 +95,7 @@ export interface BacktestResult {
     max_drawdown_pct: number;
     strategy_legs: { strategy_id: string; final_weight: number; total_return_pct: number }[];
     daily_values: [string, number][];
+    rebalance_history: { date: string; portfolio_value: number; weights: Record<string, number> }[];
     // AI-specific metrics (only present when method=ai_weighted and live_ai_calls=true)
     ai_call_count: number | null;
     ai_fallback_count: number | null;
