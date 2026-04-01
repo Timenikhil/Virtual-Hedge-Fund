@@ -7,6 +7,11 @@ max drawdown) for different allocation methods.
 
 No look-ahead bias: weights at each rebalance date are computed using
 only price data up to and including that date.
+
+For ai_weighted with live_ai_calls=True the allocator is called once per
+rebalance date using only the prices visible at that point.  Set
+live_ai_calls=False (the default) to use score_weighted as a fast proxy
+instead of incurring API calls.
 """
 
 from __future__ import annotations
@@ -19,8 +24,10 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from vhf.models.allocation import AllocationMethod
+from vhf.ai.weight_allocator_provider import resolve_allocator_provider
 from vhf.db.operations import (
     get_db_portfolio_id,
+    get_db_strat,
     get_strategy_price_history_raw,
 )
 
@@ -32,6 +39,10 @@ class BacktestRequest(BaseModel):
     end_date: str | None = None            # ISO date; defaults to latest common date
     rebalance_frequency_days: int = Field(default=21, ge=1)  # approx monthly
     initial_value: float = Field(default=100.0, gt=0)
+    # AI backtest options (only relevant when method=ai_weighted)
+    live_ai_calls: bool = False            # If True, call the AI allocator at each rebalance
+    ai_context: dict | None = None        # Extra context forwarded to the AI allocator
+    ai_timeout_seconds: float = Field(default=30.0, gt=0)
 
 
 class BacktestLeg(BaseModel):
@@ -56,6 +67,10 @@ class BacktestResult(BaseModel):
     max_drawdown_pct: float
     strategy_legs: list[BacktestLeg]
     daily_values: list[tuple[str, float]]  # (ISO date, portfolio value)
+    # AI-specific metrics (None for non-AI methods or when live_ai_calls=False)
+    ai_call_count: int | None = None
+    ai_fallback_count: int | None = None
+    weight_stability: float | None = None  # avg per-strategy weight std dev across rebalances
 
 
 class BacktestError(ValueError):
@@ -113,7 +128,7 @@ def _compute_weights(
             if total > 0:
                 return [w / total for w in stored_weights]
         return _equal_weights(n)
-    # ai_weighted: fall back to score_weighted (no live Claude calls during backtest)
+    # ai_weighted without live calls: fall back to score_weighted
     return _momentum_weights(strategy_ids, prices_up_to)
 
 
@@ -139,6 +154,64 @@ def _max_drawdown(values: list[float]) -> float:
     return max_dd * 100.0  # percent, negative
 
 
+def _build_backtest_ai_context(
+    strategy_ids: list[str],
+    strategy_meta: dict[str, dict],
+    prices_up_to: dict[str, list[float]],
+    current_weights: list[float],
+    extra_context: dict | None,
+) -> dict[str, Any]:
+    """Build the context dict passed to the AI allocator at each rebalance."""
+    strategy_data = []
+    for sid in strategy_ids:
+        prices = prices_up_to.get(sid, [])
+        meta = strategy_meta.get(sid, {})
+        strategy_data.append({
+            "strategy_id": sid,
+            "name": meta.get("name", sid),
+            "category": meta.get("category", ""),
+            "description": meta.get("description", ""),
+            "prices": prices[-20:] if len(prices) > 20 else prices,
+            "latest_price": prices[-1] if prices else None,
+            "price_count": len(prices),
+        })
+
+    ctx: dict[str, Any] = {
+        "strategies": strategy_ids,
+        "strategy_data": strategy_data,
+        "current_weights": current_weights,
+    }
+    if extra_context:
+        ctx["request_context"] = extra_context
+    return ctx
+
+
+def _parse_ai_weights(response: Any, n: int) -> list[float]:
+    """Normalize raw AI provider output into a weight vector of length n."""
+    if isinstance(response, (list, tuple)) and len(response) == n:
+        weights = [float(v) for v in response]
+        total = sum(weights)
+        if total > 0 and all(w >= 0 for w in weights):
+            return [w / total for w in weights]
+    raise ValueError(f"Cannot extract {n} non-negative weights from AI response: {response!r}")
+
+
+def _weight_stability(weight_history: list[list[float]]) -> float | None:
+    """
+    Average per-strategy weight std dev across rebalances.
+    Lower = more stable / consistent AI allocation decisions.
+    Returns None if fewer than 2 rebalances recorded.
+    """
+    if len(weight_history) < 2:
+        return None
+    n = len(weight_history[0])
+    stdevs = []
+    for j in range(n):
+        vals = [wh[j] for wh in weight_history]
+        stdevs.append(statistics.stdev(vals))
+    return round(statistics.mean(stdevs), 6) if stdevs else None
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -150,6 +223,8 @@ def run_backtest(request: BacktestRequest) -> BacktestResult:
     Args:
         request: BacktestRequest with portfolio_id, method, date range,
                  rebalance frequency, and initial capital.
+                 Set live_ai_calls=True with method=ai_weighted to call the
+                 AI allocator at each rebalance date (incurs API calls).
 
     Returns:
         BacktestResult with performance metrics and daily portfolio values.
@@ -202,11 +277,63 @@ def run_backtest(request: BacktestRequest) -> BacktestResult:
     n = len(strategy_ids)
     freq = max(1, request.rebalance_frequency_days)
 
+    # ---------------------------------------------------------------------------
+    # AI provider setup (only when live_ai_calls=True and method=ai_weighted)
+    # ---------------------------------------------------------------------------
+    use_live_ai = (
+        request.method == AllocationMethod.ai_weighted
+        and request.live_ai_calls
+    )
+    ai_provider = None
+    strategy_meta: dict[str, dict] = {}
+    if use_live_ai:
+        _, ai_provider = resolve_allocator_provider(None)
+        for sid in strategy_ids:
+            try:
+                strat = get_db_strat(sid)
+                strategy_meta[sid] = {
+                    "name": strat.name,
+                    "category": strat.category,
+                    "description": strat.description,
+                }
+            except Exception:
+                strategy_meta[sid] = {"name": sid, "category": "", "description": ""}
+
+    ai_call_count = 0
+    ai_fallback_count = 0
+    weight_history: list[list[float]] = []
+
+    def _resolve_weights(
+        prices_up_to: dict[str, list[float]],
+        current_weights: list[float],
+    ) -> list[float]:
+        nonlocal ai_call_count, ai_fallback_count
+        if ai_provider is not None:
+            ctx = _build_backtest_ai_context(
+                strategy_ids,
+                strategy_meta,
+                prices_up_to,
+                current_weights,
+                request.ai_context,
+            )
+            try:
+                raw = ai_provider.allocate(ctx, timeout_seconds=request.ai_timeout_seconds)
+                weights = _parse_ai_weights(raw, n)
+                ai_call_count += 1
+                return weights
+            except Exception:
+                ai_fallback_count += 1
+                return _equal_weights(n)
+        return _compute_weights(request.method, strategy_ids, prices_up_to, portfolio.weights)
+
+    # ---------------------------------------------------------------------------
+    # Simulation loop
+    # ---------------------------------------------------------------------------
+
     # Initialise: compute first weights at day 0 using only day-0 prices.
     initial_prices_up_to = {sid: [price_by_sid[sid][0]] for sid in strategy_ids}
-    weights = _compute_weights(
-        request.method, strategy_ids, initial_prices_up_to, portfolio.weights
-    )
+    weights = _resolve_weights(initial_prices_up_to, _equal_weights(n))
+    weight_history.append(weights)
 
     # Holdings = value allocated to each strategy.
     holdings = [w * request.initial_value for w in weights]
@@ -245,14 +372,15 @@ def run_backtest(request: BacktestRequest) -> BacktestResult:
                 sid: price_by_sid[sid][: i + 1]
                 for sid in strategy_ids
             }
-            weights = _compute_weights(
-                request.method, strategy_ids, prices_up_to, portfolio.weights
-            )
+            weights = _resolve_weights(prices_up_to, weights)
+            weight_history.append(weights)
             holdings = [w * portfolio_value for w in weights]
             n_rebalances += 1
             last_rebalance_idx = i
 
-    # Compute final metrics.
+    # ---------------------------------------------------------------------------
+    # Compute final metrics
+    # ---------------------------------------------------------------------------
     final_value = portfolio_value
     total_return = (final_value / request.initial_value - 1.0) * 100.0
 
@@ -277,6 +405,7 @@ def run_backtest(request: BacktestRequest) -> BacktestResult:
         ))
 
     portfolio_vals = [v for _, v in daily_values]
+    sharpe = _sharpe(daily_returns)
 
     return BacktestResult(
         portfolio_id=request.portfolio_id,
@@ -289,8 +418,11 @@ def run_backtest(request: BacktestRequest) -> BacktestResult:
         final_value=round(final_value, 6),
         total_return_pct=round(total_return, 4),
         annualised_return_pct=round(annualised, 4),
-        sharpe_ratio=round(_sharpe(daily_returns), 4) if _sharpe(daily_returns) is not None else None,
+        sharpe_ratio=round(sharpe, 4) if sharpe is not None else None,
         max_drawdown_pct=round(_max_drawdown(portfolio_vals), 4),
         strategy_legs=strategy_legs,
         daily_values=daily_values,
+        ai_call_count=ai_call_count if use_live_ai else None,
+        ai_fallback_count=ai_fallback_count if use_live_ai else None,
+        weight_stability=_weight_stability(weight_history) if use_live_ai else None,
     )

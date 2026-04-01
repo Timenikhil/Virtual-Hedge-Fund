@@ -329,5 +329,142 @@ class RunBacktestTest(unittest.TestCase):
         self.assertAlmostEqual(total, 1.0, places=5)
 
 
+# ---------------------------------------------------------------------------
+# ai_weighted with live_ai_calls
+# ---------------------------------------------------------------------------
+
+class AIWeightedBacktestTest(unittest.TestCase):
+
+    @patch("vhf.services.backtest.get_db_strat")
+    @patch("vhf.services.backtest.get_strategy_price_history_raw")
+    @patch("vhf.services.backtest.get_db_portfolio_id")
+    def test_live_ai_calls_invokes_provider(self, mock_portfolio, mock_history, mock_strat):
+        """With live_ai_calls=True the AI provider is called at each rebalance."""
+        mock_portfolio.return_value = _make_portfolio(["s1", "s2"])
+        mock_history.side_effect = lambda sid: _linear_prices(50)
+        mock_strat.return_value = MagicMock(name="S", category="equity", description="")
+
+        mock_provider = MagicMock()
+        mock_provider.allocate.return_value = [0.6, 0.4]
+
+        with patch("vhf.services.backtest.resolve_allocator_provider", return_value=(None, mock_provider)):
+            result = run_backtest(BacktestRequest(
+                portfolio_id=1,
+                method=AllocationMethod.ai_weighted,
+                live_ai_calls=True,
+                rebalance_frequency_days=10,
+            ))
+
+        self.assertGreater(mock_provider.allocate.call_count, 0)
+        self.assertEqual(result.ai_call_count, mock_provider.allocate.call_count)
+        self.assertEqual(result.ai_fallback_count, 0)
+
+    @patch("vhf.services.backtest.get_db_strat")
+    @patch("vhf.services.backtest.get_strategy_price_history_raw")
+    @patch("vhf.services.backtest.get_db_portfolio_id")
+    def test_live_ai_fallback_on_provider_error(self, mock_portfolio, mock_history, mock_strat):
+        """When the AI provider raises, the backtest falls back to equal_weight."""
+        mock_portfolio.return_value = _make_portfolio(["s1", "s2"])
+        mock_history.side_effect = lambda sid: _linear_prices(30)
+        mock_strat.return_value = MagicMock(name="S", category="equity", description="")
+
+        mock_provider = MagicMock()
+        mock_provider.allocate.side_effect = RuntimeError("API unavailable")
+
+        with patch("vhf.services.backtest.resolve_allocator_provider", return_value=(None, mock_provider)):
+            result = run_backtest(BacktestRequest(
+                portfolio_id=1,
+                method=AllocationMethod.ai_weighted,
+                live_ai_calls=True,
+                rebalance_frequency_days=10,
+            ))
+
+        self.assertEqual(result.ai_call_count, 0)
+        self.assertGreater(result.ai_fallback_count, 0)
+        # Result should still be valid despite fallbacks
+        self.assertIsNotNone(result.total_return_pct)
+        self.assertTrue(math.isfinite(result.total_return_pct))
+
+    @patch("vhf.services.backtest.get_db_strat")
+    @patch("vhf.services.backtest.get_strategy_price_history_raw")
+    @patch("vhf.services.backtest.get_db_portfolio_id")
+    def test_ai_metrics_none_when_live_ai_disabled(self, mock_portfolio, mock_history, mock_strat):
+        """AI metrics should be None when live_ai_calls=False (the default)."""
+        mock_portfolio.return_value = _make_portfolio(["s1", "s2"])
+        mock_history.side_effect = lambda sid: _linear_prices(30)
+
+        result = run_backtest(BacktestRequest(
+            portfolio_id=1,
+            method=AllocationMethod.ai_weighted,
+            live_ai_calls=False,
+        ))
+
+        self.assertIsNone(result.ai_call_count)
+        self.assertIsNone(result.ai_fallback_count)
+        self.assertIsNone(result.weight_stability)
+
+    @patch("vhf.services.backtest.get_db_strat")
+    @patch("vhf.services.backtest.get_strategy_price_history_raw")
+    @patch("vhf.services.backtest.get_db_portfolio_id")
+    def test_weight_stability_computed(self, mock_portfolio, mock_history, mock_strat):
+        """weight_stability is a non-negative float when live_ai_calls=True."""
+        mock_portfolio.return_value = _make_portfolio(["s1", "s2"])
+        mock_history.side_effect = lambda sid: _linear_prices(50)
+        mock_strat.return_value = MagicMock(name="S", category="equity", description="")
+
+        call_count = [0]
+
+        def alternating_weights(ctx, *, timeout_seconds):
+            # Alternate between two weight vectors to produce non-zero stability
+            call_count[0] += 1
+            return [0.7, 0.3] if call_count[0] % 2 == 0 else [0.4, 0.6]
+
+        mock_provider = MagicMock()
+        mock_provider.allocate.side_effect = alternating_weights
+
+        with patch("vhf.services.backtest.resolve_allocator_provider", return_value=(None, mock_provider)):
+            result = run_backtest(BacktestRequest(
+                portfolio_id=1,
+                method=AllocationMethod.ai_weighted,
+                live_ai_calls=True,
+                rebalance_frequency_days=10,
+            ))
+
+        self.assertIsNotNone(result.weight_stability)
+        self.assertGreaterEqual(result.weight_stability, 0.0)
+
+    @patch("vhf.services.backtest.get_db_strat")
+    @patch("vhf.services.backtest.get_strategy_price_history_raw")
+    @patch("vhf.services.backtest.get_db_portfolio_id")
+    def test_ai_context_forwarded_to_provider(self, mock_portfolio, mock_history, mock_strat):
+        """Extra ai_context dict is forwarded to the AI provider in every call."""
+        mock_portfolio.return_value = _make_portfolio(["s1", "s2"])
+        mock_history.side_effect = lambda sid: _linear_prices(25)
+        mock_strat.return_value = MagicMock(name="S", category="equity", description="")
+
+        received_contexts = []
+
+        def capture(ctx, *, timeout_seconds):
+            received_contexts.append(ctx)
+            return [0.5, 0.5]
+
+        mock_provider = MagicMock()
+        mock_provider.allocate.side_effect = capture
+
+        with patch("vhf.services.backtest.resolve_allocator_provider", return_value=(None, mock_provider)):
+            run_backtest(BacktestRequest(
+                portfolio_id=1,
+                method=AllocationMethod.ai_weighted,
+                live_ai_calls=True,
+                ai_context={"risk_appetite": "conservative"},
+                rebalance_frequency_days=10,
+            ))
+
+        self.assertTrue(all(
+            ctx.get("request_context", {}).get("risk_appetite") == "conservative"
+            for ctx in received_contexts
+        ))
+
+
 if __name__ == "__main__":
     unittest.main()
