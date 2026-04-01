@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { portfolioAPI, AdminStrategy, ReconcileJob } from '@/lib/api';
-import { Play, Trash2, Plus, RefreshCw, Power, PowerOff, Clock, Cpu, Database } from 'lucide-react';
+import { Play, Trash2, Plus, RefreshCw, Power, PowerOff, Clock, Cpu, Database, BarChart2 } from 'lucide-react';
 
 const formatInterval = (seconds: number): string => {
     if (seconds >= 86400 && seconds % 86400 === 0) return `${seconds / 86400}d`;
@@ -160,10 +161,10 @@ function ReconcileJobsPanel() {
         try {
             const [j, p] = await Promise.all([
                 portfolioAPI.listReconcileJobs(),
-                portfolioAPI.getPortfolios(),
+                portfolioAPI.adminListPortfolios(),
             ]);
             setJobs(j);
-            setPortfolios(p.map(p => ({ id: p.id, name: p.name })));
+            setPortfolios(p);
         } finally { setLoading(false); }
     };
 
@@ -364,8 +365,16 @@ function StrategiesPanel() {
     const [strategies, setStrategies] = useState<AdminStrategy[]>([]);
     const [loading, setLoading] = useState(true);
     const [creating, setCreating] = useState(false);
+    const [syncing, setSyncing] = useState(false);
     const [form, setForm] = useState({ strategy_id: '', name: '', description: '', category: '' });
     const [error, setError] = useState<string | null>(null);
+    const [syncResult, setSyncResult] = useState<string | null>(null);
+
+    // Per-row backtest sync state
+    const [backtestExpanded, setBacktestExpanded] = useState<string | null>(null);
+    const [backtestDates, setBacktestDates] = useState<Record<string, { start: string; end: string }>>({});
+    const [backtestBusy, setBacktestBusy] = useState<Record<string, boolean>>({});
+    const [backtestResult, setBacktestResult] = useState<Record<string, string>>({});
 
     const load = async () => {
         setLoading(true);
@@ -373,7 +382,59 @@ function StrategiesPanel() {
         finally { setLoading(false); }
     };
 
+    const handleSyncQR = async () => {
+        setSyncing(true);
+        setSyncResult(null);
+        setError(null);
+        try {
+            const result = await portfolioAPI.syncQRStrategies();
+            setSyncResult(`Found ${result.found} QR strategies — ${result.upserted} upserted.`);
+            load();
+        } catch (e: any) {
+            setError(e.message);
+        } finally {
+            setSyncing(false);
+        }
+    };
+
     useEffect(() => { load(); }, []);
+
+    const handleSyncBacktest = async (strategy_id: string) => {
+        const dates = backtestDates[strategy_id] ?? { start: '', end: '' };
+        setBacktestBusy(b => ({ ...b, [strategy_id]: true }));
+        setBacktestResult(r => ({ ...r, [strategy_id]: 'Running...' }));
+        setBacktestExpanded(null);
+        setError(null);
+        try {
+            const { job_id } = await portfolioAPI.startStrategyBacktest(
+                strategy_id,
+                dates.start || undefined,
+                dates.end || undefined,
+            );
+            // Poll until done or error
+            const poll = async (): Promise<void> => {
+                try {
+                    const job = await portfolioAPI.pollStrategyBacktest(strategy_id, job_id);
+                    if (job.status === 'running') {
+                        setTimeout(poll, 3000);
+                    } else if (job.status === 'done') {
+                        setBacktestResult(r => ({ ...r, [strategy_id]: `✓ ${job.points_stored} points stored` }));
+                        setBacktestBusy(b => ({ ...b, [strategy_id]: false }));
+                    } else {
+                        setBacktestResult(r => ({ ...r, [strategy_id]: `Error: ${job.detail}` }));
+                        setBacktestBusy(b => ({ ...b, [strategy_id]: false }));
+                    }
+                } catch (e: any) {
+                    setBacktestResult(r => ({ ...r, [strategy_id]: `Error: ${e.message}` }));
+                    setBacktestBusy(b => ({ ...b, [strategy_id]: false }));
+                }
+            };
+            setTimeout(poll, 3000);
+        } catch (e: any) {
+            setBacktestResult(r => ({ ...r, [strategy_id]: `Error: ${e.message}` }));
+            setBacktestBusy(b => ({ ...b, [strategy_id]: false }));
+        }
+    };
 
     const handleCreate = async () => {
         setError(null);
@@ -406,6 +467,15 @@ function StrategiesPanel() {
                 <div className="flex items-center gap-2">
                     <button onClick={load} className="p-1.5 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100 transition-colors">
                         <RefreshCw className="w-4 h-4" />
+                    </button>
+                    <button
+                        onClick={handleSyncQR}
+                        disabled={syncing}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 text-white text-sm font-medium rounded-lg hover:bg-amber-600 disabled:opacity-50 transition-colors"
+                        title="Scan the QuantRocket codeload volume for Moonshot strategies"
+                    >
+                        <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
+                        {syncing ? 'Scanning...' : 'Sync from QR'}
                     </button>
                     <button
                         onClick={() => setCreating(c => !c)}
@@ -446,6 +516,10 @@ function StrategiesPanel() {
                     </div>
                 )}
 
+                {syncResult && (
+                    <div className="mb-4 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">{syncResult}</div>
+                )}
+
                 {loading ? (
                     <p className="text-sm text-gray-400">Loading…</p>
                 ) : strategies.length === 0 ? (
@@ -459,16 +533,28 @@ function StrategiesPanel() {
                             <tr className="text-left text-xs font-medium text-gray-400 uppercase tracking-wide border-b border-gray-100">
                                 <th className="pb-2 pr-4">ID</th>
                                 <th className="pb-2 pr-4">Name</th>
+                                <th className="pb-2 pr-4">Source</th>
                                 <th className="pb-2 pr-4">Category</th>
                                 <th className="pb-2 pr-4">Description</th>
                                 <th className="pb-2"></th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-50">
+                        <tbody>
                             {strategies.map(s => (
-                                <tr key={s.strategy_id} className="hover:bg-gray-50/50 transition-colors">
+                                <React.Fragment key={s.strategy_id}>
+                                <tr className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
                                     <td className="py-3 pr-4 font-mono text-xs text-gray-500 bg-gray-50/50">{s.strategy_id}</td>
-                                    <td className="py-3 pr-4 font-medium text-gray-800">{s.name}</td>
+                                    <td className="py-3 pr-4">
+                                        <Link href={`/strategies/${s.strategy_id}`} className="font-medium text-gray-800 hover:text-indigo-600 transition-colors">
+                                            {s.name}
+                                        </Link>
+                                    </td>
+                                    <td className="py-3 pr-4">
+                                        {s.source === 'quantrocket'
+                                            ? <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-xs rounded-md font-medium">QR</span>
+                                            : <span className="px-2 py-0.5 bg-gray-100 text-gray-500 text-xs rounded-md">Local</span>
+                                        }
+                                    </td>
                                     <td className="py-3 pr-4">
                                         {s.category
                                             ? <span className="px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-md">{s.category}</span>
@@ -477,12 +563,82 @@ function StrategiesPanel() {
                                     </td>
                                     <td className="py-3 pr-4 text-gray-500 max-w-xs truncate">{s.description || <span className="text-gray-300">—</span>}</td>
                                     <td className="py-3">
-                                        <button onClick={() => handleDelete(s.strategy_id)}
-                                            className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors">
-                                            <Trash2 className="w-3.5 h-3.5" />
-                                        </button>
+                                        <div className="flex items-center gap-1">
+                                            <button
+                                                title="Sync backtest from QR"
+                                                disabled={!!backtestBusy[s.strategy_id]}
+                                                onClick={() => setBacktestExpanded(e => e === s.strategy_id ? null : s.strategy_id)}
+                                                className={`p-1.5 rounded-md transition-colors disabled:opacity-40 ${
+                                                    backtestExpanded === s.strategy_id
+                                                        ? 'text-amber-600 bg-amber-50'
+                                                        : 'text-gray-400 hover:text-amber-600 hover:bg-amber-50'
+                                                }`}
+                                            >
+                                                {backtestBusy[s.strategy_id]
+                                                    ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                                    : <BarChart2 className="w-3.5 h-3.5" />
+                                                }
+                                            </button>
+                                            <button onClick={() => handleDelete(s.strategy_id)}
+                                                className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors">
+                                                <Trash2 className="w-3.5 h-3.5" />
+                                            </button>
+                                        </div>
                                     </td>
                                 </tr>
+                                {(backtestBusy[s.strategy_id] || backtestResult[s.strategy_id]) && !backtestExpanded && (
+                                    <tr className="border-b border-gray-50">
+                                        <td colSpan={6} className="px-4 py-1.5 bg-gray-50/60">
+                                            <div className="flex items-center gap-1.5 text-xs">
+                                                {backtestBusy[s.strategy_id] && <RefreshCw className="w-3 h-3 animate-spin text-amber-500 shrink-0" />}
+                                                <span className={
+                                                    backtestResult[s.strategy_id]?.startsWith('✓') ? 'text-emerald-600' :
+                                                    backtestResult[s.strategy_id]?.startsWith('Error') ? 'text-red-500' :
+                                                    'text-amber-600'
+                                                }>
+                                                    {backtestResult[s.strategy_id] || 'Running…'}
+                                                </span>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                )}
+                                {backtestExpanded === s.strategy_id && (
+                                    <tr className="bg-amber-50/50 border-b border-amber-100">
+                                        <td colSpan={6} className="px-4 py-3">
+                                            <div className="flex items-center gap-3 flex-wrap">
+                                                <span className="text-xs font-medium text-amber-700">Sync backtest for <span className="font-mono">{s.strategy_id}</span></span>
+                                                <div className="flex items-center gap-1.5">
+                                                    <label className="text-xs text-gray-500">From</label>
+                                                    <input
+                                                        type="date"
+                                                        value={backtestDates[s.strategy_id]?.start ?? ''}
+                                                        onChange={e => setBacktestDates(d => ({ ...d, [s.strategy_id]: { ...d[s.strategy_id], start: e.target.value } }))}
+                                                        className="border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-amber-400"
+                                                    />
+                                                </div>
+                                                <div className="flex items-center gap-1.5">
+                                                    <label className="text-xs text-gray-500">To</label>
+                                                    <input
+                                                        type="date"
+                                                        value={backtestDates[s.strategy_id]?.end ?? ''}
+                                                        onChange={e => setBacktestDates(d => ({ ...d, [s.strategy_id]: { ...d[s.strategy_id], end: e.target.value } }))}
+                                                        className="border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-amber-400"
+                                                    />
+                                                </div>
+                                                <span className="text-xs text-gray-400">Leave blank to use QR defaults</span>
+                                                <button
+                                                    onClick={() => handleSyncBacktest(s.strategy_id)}
+                                                    disabled={!!backtestBusy[s.strategy_id]}
+                                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 text-white text-xs font-medium rounded-lg hover:bg-amber-600 disabled:opacity-50 transition-colors"
+                                                >
+                                                    <Play className="w-3 h-3" />
+                                                    Run Backtest
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                )}
+                                </React.Fragment>
                             ))}
                         </tbody>
                     </table>

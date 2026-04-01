@@ -38,6 +38,7 @@ export interface AdminStrategy {
     name: string;
     description: string;
     category: string;
+    source: string;
 }
 
 export interface ReconcileJob {
@@ -313,6 +314,16 @@ export const portfolioAPI = {
     // Admin: portfolio management
     // -------------------------------------------------------------------------
 
+    adminListPortfolios: async (): Promise<{ id: number; name: string }[]> => {
+        const apiKey = process.env.NEXT_PUBLIC_ADMIN_API_KEY ?? '';
+        const response = await fetch(`${API_BASE_URL}/portfolios`, {
+            headers: { 'X-API-Key': apiKey },
+        });
+        if (!response.ok) throw new Error('Failed to list portfolios');
+        const data = await response.json();
+        return (data.portfolios ?? []).map((p: any) => ({ id: p.portfolio_id, name: p.portfolio_name }));
+    },
+
     updatePortfolio: async (portfolio_id: number, portfolio_name?: string, account?: string): Promise<void> => {
         const apiKey = process.env.NEXT_PUBLIC_ADMIN_API_KEY ?? '';
         const body: any = {};
@@ -357,6 +368,16 @@ export const portfolioAPI = {
     // Admin: strategy management
     // -------------------------------------------------------------------------
 
+    syncQRStrategies: async (): Promise<{ found: number; upserted: number; strategies: string[] }> => {
+        const apiKey = process.env.NEXT_PUBLIC_ADMIN_API_KEY ?? '';
+        const response = await fetch(`${API_BASE_URL}/admin/strategies/sync-qr`, {
+            method: 'POST',
+            headers: { 'X-API-Key': apiKey },
+        });
+        if (!response.ok) throw new Error('Failed to sync QR strategies');
+        return response.json();
+    },
+
     adminGetStrategies: async (): Promise<AdminStrategy[]> => {
         const apiKey = process.env.NEXT_PUBLIC_ADMIN_API_KEY ?? '';
         const response = await fetch(`${API_BASE_URL}/strategies`, {
@@ -374,6 +395,42 @@ export const portfolioAPI = {
             body: JSON.stringify({ strategy_id, name, description, category }),
         });
         if (!response.ok) throw new Error('Failed to upsert strategy');
+        return response.json();
+    },
+
+    startStrategyBacktest: async (
+        strategy_id: string,
+        start_date?: string,
+        end_date?: string,
+    ): Promise<{ job_id: string; status: string }> => {
+        const apiKey = process.env.NEXT_PUBLIC_ADMIN_API_KEY ?? '';
+        const body: any = {};
+        if (start_date) body.start_date = start_date;
+        if (end_date) body.end_date = end_date;
+        const response = await fetch(`${API_BASE_URL}/admin/strategies/${strategy_id}/sync-backtest`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
+            body: JSON.stringify(body),
+        });
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error((err as any).detail ?? 'Failed to start backtest');
+        }
+        return response.json();
+    },
+
+    pollStrategyBacktest: async (
+        strategy_id: string,
+        job_id: string,
+    ): Promise<{ status: string; points_stored?: number; detail?: string }> => {
+        const apiKey = process.env.NEXT_PUBLIC_ADMIN_API_KEY ?? '';
+        const response = await fetch(`${API_BASE_URL}/admin/strategies/${strategy_id}/sync-backtest/${job_id}`, {
+            headers: { 'X-API-Key': apiKey },
+        });
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error((err as any).detail ?? 'Failed to poll backtest job');
+        }
         return response.json();
     },
 

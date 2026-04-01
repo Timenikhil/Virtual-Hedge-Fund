@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, HTTPException, Query
+import uuid
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from vhf.db.operations import (
@@ -352,6 +353,27 @@ def api_bulk_upsert_strategies(strategies: List[StrategyUpsertRequest]):
     return bulk_upsert_strategies([s.model_dump() for s in strategies])
 
 
+@router.post("/strategies/sync-qr")
+def api_sync_qr_strategies(codeload_path: str | None = None) -> dict:
+    """
+    Scan the QuantRocket codeload volume for Moonshot strategy .py files and
+    upsert any discovered strategies into the database with source='quantrocket'.
+
+    Pass codeload_path to override the default CODELOAD_PATH env var / /codeload.
+    Returns a summary of how many strategies were found and upserted.
+    """
+    from vhf.quantrocket.strategy_scanner import scan_codeload
+    discovered = scan_codeload(codeload_path)
+    if not discovered:
+        return {"found": 0, "upserted": 0, "strategies": []}
+    bulk_upsert_strategies(discovered)
+    return {
+        "found": len(discovered),
+        "upserted": len(discovered),
+        "strategies": [s["strategy_id"] for s in discovered],
+    }
+
+
 @router.delete("/strategies/{strategy_id}", status_code=204)
 def api_delete_strategy(strategy_id: str):
     """Delete a strategy and all its price history."""
@@ -364,6 +386,47 @@ def api_record_strategy_prices(strategy_id: str, req: StrategyPricePointsRequest
     if not req.points:
         raise HTTPException(status_code=400, detail="points list must not be empty")
     record_strategy_price_points(strategy_id, req.points)
+
+
+class SyncBacktestRequest(BaseModel):
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+
+
+# In-memory job store: job_id → {status, strategy_id, points_stored?, detail?}
+_backtest_jobs: Dict[str, Dict] = {}
+
+
+def _run_backtest_job(job_id: str, strategy_id: str, start_date: Optional[str], end_date: Optional[str]) -> None:
+    from vhf.quantrocket.backtest_sync import BacktestSyncError, sync_strategy_backtest
+    try:
+        n = sync_strategy_backtest(strategy_id, start_date=start_date, end_date=end_date)
+        _backtest_jobs[job_id] = {"status": "done", "strategy_id": strategy_id, "points_stored": n}
+    except BacktestSyncError as exc:
+        _backtest_jobs[job_id] = {"status": "error", "strategy_id": strategy_id, "detail": str(exc)}
+    except Exception as exc:
+        _backtest_jobs[job_id] = {"status": "error", "strategy_id": strategy_id, "detail": f"Unexpected error: {exc}"}
+
+
+@router.post("/strategies/{strategy_id}/sync-backtest", status_code=202)
+def api_sync_strategy_backtest(strategy_id: str, req: SyncBacktestRequest, background_tasks: BackgroundTasks):
+    """
+    Start a QR Moonshot backtest for a strategy in the background.
+    Returns a job_id immediately. Poll GET /strategies/{id}/sync-backtest/{job_id} for status.
+    """
+    job_id = uuid.uuid4().hex[:12]
+    _backtest_jobs[job_id] = {"status": "running", "strategy_id": strategy_id}
+    background_tasks.add_task(_run_backtest_job, job_id, strategy_id, req.start_date, req.end_date)
+    return {"job_id": job_id, "status": "running"}
+
+
+@router.get("/strategies/{strategy_id}/sync-backtest/{job_id}")
+def api_get_backtest_job(strategy_id: str, job_id: str):
+    """Poll backtest job status."""
+    job = _backtest_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
 
 
 # ---------------------------------------------------------------------------

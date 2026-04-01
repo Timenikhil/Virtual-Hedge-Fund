@@ -15,7 +15,6 @@ def _ensure_column(cursor, table: str, column: str, definition: str) -> None:
 
 def initialiseDB():
     connection.connect()
-    connection.client.sync()
     with closing(connection.client.cursor()) as cursor:
         try:
             cursor.execute(
@@ -128,6 +127,7 @@ def initialiseDB():
             )
 
             # Backward-compatible schema evolution for existing DBs.
+            _ensure_column(cursor, "strategies", "SOURCE", "TEXT NOT NULL DEFAULT 'local'")
             _ensure_column(cursor, "reconcile_jobs", "AI_PROVIDER_MODE", "TEXT")
             _ensure_column(cursor, "reconcile_jobs", "AI_STRICT", "INTEGER NOT NULL DEFAULT 0")
             _ensure_column(cursor, "reconcile_jobs", "AI_TIMEOUT_SECONDS", "REAL NOT NULL DEFAULT 10.0")
@@ -144,7 +144,6 @@ def initialiseDB():
             )
 
             connection.client.commit()
-            connection.client.sync()
         except Exception:
             try:
                 connection.client.rollback()

@@ -10,7 +10,8 @@ class StrategyID(BaseModel):
 class Strategy(StrategyID):
     name: str
     description: str
-    category : str
+    category: str
+    source: str = "local"
 
 class StrategyList(BaseModel):
     strategies: List[Strategy]

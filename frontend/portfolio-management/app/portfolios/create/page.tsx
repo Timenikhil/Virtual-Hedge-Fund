@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Filter, Settings, Shuffle, Sliders, RefreshCw, ChevronDown, Play, ArrowLeft } from 'lucide-react';
 import { portfolioAPI } from '@/lib/api';
 import { StrategySelector, Strategy } from '@/components/StrategySelector';
@@ -9,18 +9,6 @@ import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/contexts/ToastContext';
 
-// const INITIAL_STRATEGIES: Strategy[] = [
-//     { id: 'strat-1', name: 'Momentum Strategy', description: 'Trend-following based on price momentum', category: 'Trend' },
-//     { id: 'strat-2', name: 'Mean Reversion', description: 'Statistical arbitrage on price reversals', category: 'Statistical' },
-//     { id: 'strat-3', name: 'Value Investing', description: 'Fundamental analysis based approach', category: 'Fundamental' },
-//     { id: 'strat-4', name: 'Market Making', description: 'Spread capture and liquidity provision', category: 'Arbitrage' },
-//     { id: 'strat-5', name: 'Pairs Trading', description: 'Correlated asset arbitrage', category: 'Statistical' },
-//     { id: 'strat-6', name: 'Options Strategy', description: 'Volatility and delta-neutral strategies', category: 'Derivatives' },
-//     { id: 'strat-7', name: 'Machine Learning', description: 'AI-driven predictive models', category: 'Quantitative' },
-//     { id: 'strat-8', name: 'Risk Parity', description: 'Equal risk contribution allocation', category: 'Risk-Based' },
-// ];
-
-const INITIAL_STRATEGIES = await portfolioAPI.getStrategies();
 
 export default function PortfolioManagement() {
     const router = useRouter();
@@ -30,12 +18,18 @@ export default function PortfolioManagement() {
     const [portfolioName, setPortfolioName] = useState('');
     const [accountName, setAccountName] = useState('');
     const [portfolioId, setPortfolioId] = useState<number | null>(null);
-    const [strategies, setStrategies] = useState<Strategy[]>(INITIAL_STRATEGIES);
+    const [strategies, setStrategies] = useState<Strategy[]>([]);
     const [selectedStrategies, setSelectedStrategies] = useState<string[]>([]);
     const [aiPrompt, setAiPrompt] = useState('');
     const [selector, setSelector] = useState<string | null>('topk');
     const [selectorK, setSelectorK] = useState<number | null>(10);
     const [weights, setWeights] = useState<number[]>([]);
+
+    const [loadingStep, setLoadingStep] = useState<number | null>(null);
+
+    useEffect(() => {
+        portfolioAPI.getStrategies().then(setStrategies).catch(() => {});
+    }, []);
 
     const [stepStatus, setStepStatus] = useState({
         1: 'active' as 'active' | 'completed' | 'pending',
@@ -60,13 +54,18 @@ export default function PortfolioManagement() {
     }, []);
 
     const handleStep1Submit = async () => {
+        setLoadingStep(1);
         try {
             let id: number;
-            if (workflowMode === 'manual') {
+            if (portfolioId !== null) {
+                // Re-submitting: update strategies on the existing portfolio instead of creating a duplicate
+                await portfolioAPI.choosePortfolio(portfolioId, selectedStrategies);
+                id = portfolioId;
+            } else if (workflowMode === 'manual') {
                 id = await portfolioAPI.selectPool({
                     portfolio_name: portfolioName,
                     account: accountName,
-                    strategies: selectedStrategies
+                    strategies: selectedStrategies,
                 });
             } else {
                 id = await portfolioAPI.aiSelectPool(portfolioName, accountName, aiPrompt);
@@ -75,11 +74,14 @@ export default function PortfolioManagement() {
             handleStepComplete(1);
         } catch {
             toast.error('Failed to create strategy pool');
+        } finally {
+            setLoadingStep(null);
         }
     };
 
     const handleStep2Submit = async () => {
         if (!portfolioId) return;
+        setLoadingStep(2);
         try {
             let strats: string[];
             if (workflowMode === 'manual') {
@@ -92,21 +94,27 @@ export default function PortfolioManagement() {
             handleStepComplete(2);
         } catch {
             toast.error('Failed to apply portfolio algorithm');
+        } finally {
+            setLoadingStep(null);
         }
     };
 
     const handleStep3Submit = async () => {
         if (!portfolioId) return;
+        setLoadingStep(3);
         try {
             await portfolioAPI.choosePortfolio(portfolioId, selectedStrategies);
             handleStepComplete(3);
         } catch {
             toast.error('Failed to confirm strategy selection');
+        } finally {
+            setLoadingStep(null);
         }
     };
 
     const handleStep4Submit = async () => {
         if (!portfolioId) return;
+        setLoadingStep(4);
         try {
             if (workflowMode !== 'manual') {
                 const final = selectedStrategies.map(() => 1);
@@ -118,6 +126,8 @@ export default function PortfolioManagement() {
             handleStepComplete(4);
         } catch {
             toast.error('Failed to set weights');
+        } finally {
+            setLoadingStep(null);
         }
     };
 
@@ -129,6 +139,7 @@ export default function PortfolioManagement() {
 
     const handleStep5Submit = async () => {
         if (!portfolioId) return;
+        setLoadingStep(5);
         try {
             await portfolioAPI.createReconcileJob(
                 portfolioId,
@@ -142,6 +153,8 @@ export default function PortfolioManagement() {
             router.push(`/portfolios/${portfolioId}`);
         } catch {
             toast.error('Failed to create rebalancing job');
+        } finally {
+            setLoadingStep(null);
         }
     };
 
@@ -243,11 +256,11 @@ export default function PortfolioManagement() {
 
                             <button
                                 onClick={handleStep1Submit}
-                                disabled={!portfolioName || !accountName || (workflowMode === 'manual' && selectedStrategies.length === 0)}
+                                disabled={loadingStep === 1 || !portfolioName || !accountName || (workflowMode === 'manual' && selectedStrategies.length === 0)}
                                 className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                             >
-                                <Play className="w-4 h-4" />
-                                {workflowMode === 'manual' ? 'Select Pool' : 'AI Select Pool'}
+                                {loadingStep === 1 ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                                {loadingStep === 1 ? 'Creating...' : workflowMode === 'manual' ? 'Select Pool' : 'AI Select Pool'}
                             </button>
                         </div>
                     </StepCard>
@@ -289,11 +302,11 @@ export default function PortfolioManagement() {
                             )}
                             <button
                                 onClick={handleStep2Submit}
-                                disabled={!portfolioId}
+                                disabled={loadingStep === 2 || !portfolioId}
                                 className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                             >
-                                <Play className="w-4 h-4" />
-                                {workflowMode === 'manual' ? 'Apply Algorithm' : 'AI Select Algorithm'}
+                                {loadingStep === 2 ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                                {loadingStep === 2 ? 'Applying...' : workflowMode === 'manual' ? 'Apply Algorithm' : 'AI Select Algorithm'}
                             </button>
                         </div>
                     </StepCard>
@@ -318,10 +331,10 @@ export default function PortfolioManagement() {
                             />
                             <button
                                 onClick={handleStep3Submit}
-                                disabled={ !portfolioId || selectedStrategies.length === 0}
+                                disabled={loadingStep === 3 || !portfolioId || selectedStrategies.length === 0}
                                 className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-                                <Play className="w-4 h-4" />
-                                Confirm Selection
+                                {loadingStep === 3 ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                                {loadingStep === 3 ? 'Confirming...' : 'Confirm Selection'}
                             </button>
                         </div>
                     </StepCard>
@@ -362,10 +375,11 @@ export default function PortfolioManagement() {
 
                             <button
                                 onClick={handleStep4Submit}
-                                disabled={!portfolioId || (selectedStrategies.length != weights.length && workflowMode === 'manual')}
-                                className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                                disabled={loadingStep === 4 || !portfolioId || (selectedStrategies.length != weights.length && workflowMode === 'manual')}
+                                className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                             >
-                                Set Weights
+                                {loadingStep === 4 ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                                {loadingStep === 4 ? 'Saving...' : 'Set Weights'}
                             </button>
                         </div>
                     </StepCard>
@@ -421,11 +435,11 @@ export default function PortfolioManagement() {
                             </div>
                             <button
                                 onClick={handleStep5Submit}
-                                disabled={!portfolioId}
+                                disabled={loadingStep === 5 || !portfolioId}
                                 className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                             >
-                                <Play className="w-4 h-4" />
-                                Create Portfolio
+                                {loadingStep === 5 ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                                {loadingStep === 5 ? 'Creating...' : 'Create Portfolio'}
                             </button>
                         </div>
                     </StepCard>

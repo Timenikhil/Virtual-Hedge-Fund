@@ -14,8 +14,6 @@ python-logging-loki = "^0.3.1"
 prometheus-fastapi-instrumentator = "^7.1.0"
 opentelemetry-instrumentation-fastapi = "^0.59b0"
 opentelemetry-exporter-otlp = "^1.38.0"
-libsql-client = "^0.3.1"
-libsql = "^0.1.11"
 anthropic = "^0.86.0"
 
 
@@ -24,9 +22,20 @@ anthropic = "^0.86.0"
 poethepoet = "^0.27.0"
 
 [tool.poe.tasks]
+# QuantRocket containers — start once, rarely need restarting
 up-qr = "docker compose -f docker-compose.quantrocket.yml up -d"
-up-api = "docker compose -f docker-compose.vhf.yml up --build"
-up-all = "docker compose -f docker-compose.quantrocket.yml -f docker-compose.vhf.yml up --build"
+down-qr = "docker compose -f docker-compose.quantrocket.yml down"
+
+# VHF API — source is volume-mounted so uvicorn --reload handles code changes
+# Only rebuild when pyproject.toml / Dockerfile changes (new dependencies, etc.)
+up-api = "docker compose -f docker-compose.vhf.yml up -d"
+build-api = "docker compose -f docker-compose.vhf.yml up --build -d"
+restart-api = "docker compose -f docker-compose.vhf.yml restart vhf-api"
+down-api = "docker compose -f docker-compose.vhf.yml down"
+
+# Combined
+up-all = "docker compose -f docker-compose.quantrocket.yml -f docker-compose.vhf.yml up -d"
+build-all = "docker compose -f docker-compose.quantrocket.yml -f docker-compose.vhf.yml up --build -d"
 down = "docker compose -f docker-compose.quantrocket.yml -f docker-compose.vhf.yml down"
 ps = "docker compose -f docker-compose.quantrocket.yml -f docker-compose.vhf.yml ps"
 logs-api = "docker compose -f docker-compose.vhf.yml logs -f vhf-api"
