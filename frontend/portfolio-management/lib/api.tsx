@@ -95,6 +95,10 @@ export interface BacktestResult {
     max_drawdown_pct: number;
     strategy_legs: { strategy_id: string; final_weight: number; total_return_pct: number }[];
     daily_values: [string, number][];
+    // AI-specific metrics (only present when method=ai_weighted and live_ai_calls=true)
+    ai_call_count: number | null;
+    ai_fallback_count: number | null;
+    weight_stability: number | null;
 }
 
 export const portfolioAPI = {
@@ -223,12 +227,14 @@ export const portfolioAPI = {
         rebalance_frequency_days: number,
         start_date?: string,
         end_date?: string,
-        initial_value: number = 100
+        initial_value: number = 100,
+        live_ai_calls: boolean = false,
     ): Promise<BacktestResult> => {
         const apiKey = process.env.NEXT_PUBLIC_ADMIN_API_KEY ?? '';
         const body: any = { portfolio_id, method, rebalance_frequency_days, initial_value };
         if (start_date) body.start_date = start_date;
         if (end_date) body.end_date = end_date;
+        if (live_ai_calls) body.live_ai_calls = true;
 
         const response = await fetch(`${API_BASE_URL}/admin/backtest`, {
             method: 'POST',

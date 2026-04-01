@@ -59,6 +59,7 @@ export default function BacktestPage() {
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
     const [initialValue, setInitialValue] = useState(100);
+    const [liveAi, setLiveAi] = useState(false);
     const [loading, setLoading] = useState(false);
     const [result, setResult] = useState<BacktestResult | null>(null);
     const [error, setError] = useState<string | null>(null);
@@ -75,6 +76,7 @@ export default function BacktestPage() {
                 startDate || undefined,
                 endDate || undefined,
                 initialValue,
+                liveAi,
             );
             setResult(data);
         } catch (e: any) {
@@ -182,6 +184,28 @@ export default function BacktestPage() {
                             </div>
                         </div>
 
+                        {/* Live AI calls toggle — only shown for ai_weighted */}
+                        {method === 'ai_weighted' && (
+                            <div className="mt-4 flex items-start gap-3 p-4 bg-indigo-50 border border-indigo-100 rounded-lg">
+                                <input
+                                    type="checkbox"
+                                    id="liveAi"
+                                    checked={liveAi}
+                                    onChange={e => setLiveAi(e.target.checked)}
+                                    className="mt-0.5 w-4 h-4 accent-indigo-600"
+                                />
+                                <div>
+                                    <label htmlFor="liveAi" className="text-sm font-medium text-indigo-800 cursor-pointer">
+                                        Live AI calls (Claude API)
+                                    </label>
+                                    <p className="text-xs text-indigo-600 mt-0.5">
+                                        Calls Claude at each rebalance date using only prices visible at that point.
+                                        Unchecked uses score-weighted as a fast proxy. Live calls incur API cost.
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+
                         <button
                             onClick={runBacktest}
                             disabled={loading}
@@ -246,6 +270,31 @@ export default function BacktestPage() {
                                     subtitle={`${result.start_date} → ${result.end_date}`}
                                 />
                             </div>
+
+                            {/* AI allocation metrics — only shown when live AI was used */}
+                            {result.ai_call_count != null && (
+                                <div className="mb-8 p-4 bg-indigo-50 border border-indigo-100 rounded-lg">
+                                    <h3 className="text-sm font-semibold text-indigo-800 mb-3">AI Allocator Metrics</h3>
+                                    <div className="grid grid-cols-3 gap-4">
+                                        <div>
+                                            <p className="text-xs text-indigo-600">Claude calls</p>
+                                            <p className="text-xl font-bold text-indigo-900">{result.ai_call_count}</p>
+                                        </div>
+                                        <div>
+                                            <p className="text-xs text-indigo-600">Fallbacks to equal-weight</p>
+                                            <p className={`text-xl font-bold ${result.ai_fallback_count ? 'text-amber-600' : 'text-indigo-900'}`}>
+                                                {result.ai_fallback_count ?? 0}
+                                            </p>
+                                        </div>
+                                        <div>
+                                            <p className="text-xs text-indigo-600">Weight stability <span className="font-normal">(avg σ, lower = more consistent)</span></p>
+                                            <p className="text-xl font-bold text-indigo-900">
+                                                {result.weight_stability != null ? result.weight_stability.toFixed(4) : '—'}
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
 
                             {/* Portfolio value chart */}
                             <div className="bg-white rounded-lg border p-6 mb-8">
