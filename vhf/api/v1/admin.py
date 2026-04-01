@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from vhf.db.operations import (
     bulk_upsert_strategies,
+    delete_backtest_result,
     get_backtest_result,
     list_backtest_results,
     save_backtest_result,
@@ -505,3 +506,9 @@ def api_list_backtest_runs(portfolio_id: int):
 def api_get_backtest_run(portfolio_id: int, run_id: int):
     """Retrieve the full BacktestResult for a saved run."""
     return get_backtest_result(run_id)
+
+
+@router.delete("/backtest/{portfolio_id}/runs/{run_id}", status_code=204)
+def api_delete_backtest_run(portfolio_id: int, run_id: int):
+    """Delete a saved backtest run."""
+    delete_backtest_result(run_id)

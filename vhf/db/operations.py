@@ -1425,3 +1425,15 @@ def get_backtest_result(run_id: int) -> dict:
     if not row:
         raise HTTPException(status_code=404, detail=f"Backtest run {run_id} not found")
     return json.loads(row[0])
+
+
+def delete_backtest_result(run_id: int) -> None:
+    """Delete a persisted backtest run by ID. Raises 404 if not found."""
+    with connection.db_lock:
+        connection.connect()
+        with closing(connection.client.cursor()) as cursor:
+            cursor.execute("SELECT 1 FROM backtest_results WHERE ID = ?", (run_id,))
+            if not cursor.fetchone():
+                raise HTTPException(status_code=404, detail=f"Backtest run {run_id} not found")
+            cursor.execute("DELETE FROM backtest_results WHERE ID = ?", (run_id,))
+            connection.client.commit()

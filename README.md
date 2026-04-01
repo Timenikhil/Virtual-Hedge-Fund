@@ -1,317 +1,315 @@
 # Virtual Hedge Fund (VHF)
 
-Virtual Hedge Fund is a FastAPI backend for building and running strategy portfolios.
+VHF is a FastAPI backend for AI-driven portfolio management and backtesting, built as a Final Year Project (CP4101 B.Comp. Dissertation) at NUS School of Computing, AY2025/2026.
 
-At a high level, VHF is an orchestration service that:
-- stores portfolios and strategy metadata
-- computes target weights (manual, rules-based, or AI-driven)
-- generates and applies rebalance plans
-- schedules recurring reconcile jobs
-- optionally executes trades through QuantRocket
+**Research question:** Can LLMs serve as practical portfolio weight allocators when given structured financial context, and what infrastructure properties are required to deploy them safely in a live trading environment?
 
-## Core Capabilities
+---
 
-### Portfolio Management
-- Create a portfolio with a strategy pool and mapped broker/account identifier.
-- Update strategy membership for a portfolio.
-- Seed/update portfolio weights.
-- Query portfolios and strategies.
-
-Primary routes:
-- `POST /api/v1/select-pool`
-- `POST /api/v1/select-portfolio`
-- `POST /api/v1/choose-portfolio`
-- `POST /api/v1/seed-portfolio`
-- `GET /api/v1/portfolios`
-- `GET /api/v1/strategies`
-
-### Allocation Engine
-Supported methods:
-- `manual`
-- `equal_weight`
-- `score_weighted`
-- `ai_weighted`
-
-Behavior:
-- validates and normalizes all weight vectors
-- supports strict vs fallback behavior for AI allocation errors
-- can persist normalized target weights back to the portfolio
-- stores allocation snapshots for audit/debugging
-
-Primary route:
-- `POST /api/v1/allocate-portfolio`
-
-### Rebalance Engine
-- Builds rebalance legs (`buy` / `sell` / `hold`) from current vs target weights.
-- Applies drift threshold filtering.
-- Optionally applies target weights to portfolio state (`apply=true`).
-- Stores rebalance run snapshots.
-
-Primary route:
-- `POST /api/v1/rebalance-plan`
-
-### Reconcile Jobs + Scheduler
-- Create recurring jobs with allocation method, threshold, interval, and execution behavior.
-- Run manually or via in-process scheduler loop.
-- Scheduler uses DB-backed claim/lock semantics to reduce duplicate execution across workers/instances.
-- Job state tracks status/error/next-run timestamps.
-
-Primary routes:
-- `POST /api/v1/admin/reconcile/jobs`
-- `GET /api/v1/admin/reconcile/jobs`
-- `GET /api/v1/admin/reconcile/jobs/{job_id}`
-- `POST /api/v1/admin/reconcile/jobs/{job_id}/run`
-- `POST /api/v1/admin/reconcile/jobs/{job_id}/enabled`
-- `POST /api/v1/admin/reconcile/scheduler/run-due`
-- `POST /api/v1/admin/reconcile/scheduler/start`
-- `POST /api/v1/admin/reconcile/scheduler/stop`
-- `GET /api/v1/admin/reconcile/scheduler/status`
-
-### Trading + Realtime Ops
-- Dry-run orders CSV generation.
-- Live one-shot trade invocation via QuantRocket CLI wrappers.
-- Realtime DB create/list/start/stop helpers.
-
-Primary routes:
-- `POST /api/v1/admin/trade`
-- `GET /api/v1/admin/orders.csv`
-- `POST /api/v1/admin/realtime/create-tick-db`
-- `POST /api/v1/admin/realtime/create-agg-db`
-- `POST /api/v1/admin/realtime/start`
-- `POST /api/v1/admin/realtime/stop`
-- `GET /api/v1/admin/realtime/dbs`
-
-## Authentication
-
-Admin routes (`/api/v1/admin/*`) require the `X-API-Key` header.
-
-- Set `ADMIN_API_KEY` in your `.env` file.
-- Missing or blank key → `503 Service Unavailable`.
-- Wrong/missing header → `401 Unauthorized`.
-
-The public API (`/api/v1/*`) has no authentication requirement.
-
-## Backtesting
-
-`POST /api/v1/admin/backtest` runs a historical simulation over stored strategy price data.
-
-Request fields:
-- `portfolio_id` — portfolio to backtest
-- `method` — `equal_weight`, `score_weighted`, `ai_weighted`, or `manual`
-- `rebalance_frequency_days` — how often to rebalance (default 30)
-- `start_date` / `end_date` — optional ISO date filters
-- `initial_value` — starting portfolio value (default 100)
-
-Response includes:
-- `total_return_pct`, `annualised_return_pct`, `sharpe_ratio`, `max_drawdown_pct`
-- `daily_values` — `[date, value]` pairs for charting
-- `strategy_legs` — per-strategy final weight and individual return
-
-Notes:
-- No look-ahead bias: weights at rebalance date `t` use only `prices[0..t]`.
-- `ai_weighted` falls back to `score_weighted` to avoid calling Claude once per rebalance date.
-
-## AI Integration
-
-### AI Weight Allocator (for `ai_weighted`)
-Provider modes:
-- `auto`
-- `local`
-- `remote`
-- `disabled`
-
-Environment controls:
-- `AI_ALLOCATOR_MODE`
-- `AI_ALLOCATOR_LOCAL_MODULE` (default `vhf.ai.ai_weight_allocator`)
-- `AI_ALLOCATOR_LOCAL_FUNCTION` (default `allocate_weights`)
-- `AI_ALLOCATOR_URL`
-- `AI_ALLOCATOR_API_KEY`
-
-Accepted AI response payload shapes:
-- `[w1, w2, ...]`
-- `{"weights": [...]}`
-- `{"target_weights": [...]}`
-- `{"allocations": {"SID1": 0.2, "SID2": 0.8}}`
-- `{"SID1": 0.2, "SID2": 0.8}`
-
-### AI-Powered Pool Selection
-`POST /api/v1/ai-select-pool` — accepts a natural language `prompt` and returns a portfolio ID.
-Calls Claude (`claude-sonnet-4-6`) with the full list of available strategy IDs to select the best matching pool.
-Falls back to all available strategies if `ANTHROPIC_API_KEY` is not set.
-
-### AI in Reconcile Jobs
-Recurring jobs can persist AI allocation parameters directly:
-- `ai_provider_mode`
-- `ai_strict`
-- `ai_timeout_seconds`
-- `ai_context`
-
-These are forwarded into each scheduled rebalance/allocation run.
-
-## Selector Behavior
-
-Selector implementation:
-- `topk`: first `k` strategies by current ordering
-- `bottomk`: last `k` strategies
-- `ai` selector mode: calls Claude to select the best `k` strategies from the available pool
-
-`ai-select-pool` uses the Anthropic API to parse a natural language prompt against available strategy IDs.
-
-## Ranking and Query Behavior
-
-`GET /api/v1/portfolios` and `GET /api/v1/strategies` support `rankBy` and `limit`.
-
-`rankBy` supports ascending or descending via `-` prefix.
-Examples:
-- `rankBy=name`
-- `rankBy=-date`
-- `rankBy=-p5`
-
-Invalid `rankBy` values return `400`.
-
-## Allocation Sync Safety
-
-When syncing portfolio allocations to QuantRocket account mappings:
-- portfolio must have weights
-- number of weights must match number of strategies
-
-Mismatch/missing states now fail fast (HTTP `409`) instead of silently truncating.
-
-## Data Model (DB)
-
-Core tables:
-- `portfolios`
-- `strategies`
-- `portfolio_accounts`
-- `portfolio_allocations`
-- `rebalance_runs`
-- `reconcile_jobs`
-- `strategy_price_history`
-
-Notes:
-- strategy history supports more than legacy `P0..P5`; reads prefer `strategy_price_history` and fall back to legacy columns if history table has no rows for a strategy.
-- reconcile jobs include lock fields (`LOCKED_AT`, `LOCKED_BY`) for scheduler claims.
-
-## Runtime Architecture
-
-1. FastAPI route receives request.
-2. Service layer computes allocation/rebalance/reconcile logic.
-3. DB operations persist state and audit artifacts.
-4. QuantRocket adapters perform external sync/execution.
-
-Main modules:
-- `vhf/api/auth.py` — API key authentication dependency
-- `vhf/api/v1/public.py` — public routes (no auth)
-- `vhf/api/v1/admin.py` — admin routes (auth required)
-- `vhf/services/allocation_service.py`
-- `vhf/services/backtest.py` — backtesting engine
-- `vhf/services/rebalance_engine.py`
-- `vhf/services/reconcile_service.py`
-- `vhf/services/reconcile_scheduler.py`
-- `vhf/db/operations.py`
-- `vhf/quantrocket/cli.py`
-
-## Local Setup
+## Quick Start
 
 ### Prerequisites
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
-- [Poetry](https://python-poetry.org/docs/#installation)
-- Python `3.13`
 
-### Clone + Env
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+- [Poetry](https://python-poetry.org/docs/#installation) (`pip install poetry`)
+- Python 3.13
+- [pnpm](https://pnpm.io/installation) (for the frontend)
+
+### 1. Clone and configure
+
 ```bash
 git clone <repo-url>
 cd Virtual-Hedge-Fund
 cp .env.example .env
 ```
 
-Set required `.env` values, especially:
-- `DB_URL` — libSQL/Turso database URL
-- `DB_TOKEN` — Turso auth token (leave blank for local SQLite)
-- `ADMIN_API_KEY` — secret key for admin endpoints (`X-API-Key` header)
-- `ANTHROPIC_API_KEY` — for AI allocation and AI pool/portfolio selection
+Edit `.env` and set at minimum:
 
-### Install
+| Variable | Description |
+|---|---|
+| `ADMIN_API_KEY` | Secret for admin endpoints (`X-API-Key` header) |
+| `ANTHROPIC_API_KEY` | Required for AI-weighted allocation and AI pool selection |
+| `NEXT_PUBLIC_ADMIN_API_KEY` | Same key — used by the frontend |
+
+### 2. Install Python dependencies
+
 ```bash
 poetry install
 ```
 
-### Run
-QuantRocket + API:
+### 3. Start the API
+
 ```bash
+# API only (no QuantRocket)
+docker compose -f docker-compose.vhf.yml up --build
+
+# API + full QuantRocket stack
 poetry run poe up-all
 ```
 
-API only:
-```bash
-poetry run poe up-api
-```
+API available at `http://localhost:8000` — interactive docs at `http://localhost:8000/docs`.
 
-API docs:
-- `http://localhost:8000/docs`
+### 4. Start the frontend
 
-### QuantRocket Bootstrap (one-time)
-References:
-- https://www.quantrocket.com/account/
-- https://www.quantrocket.com/docs/#deploy-license-key
-
-Example:
-```python
-from quantrocket.license import set_license
-from quantrocket.history import create_usstock_db, collect_history
-from quantrocket.master import get_securities, create_universe
-from quantrocket.history import list_sids
-
-set_license("<YOUR_LICENSE_KEY>")
-create_usstock_db("usstock-free-1d", bar_size="1 day", free=True)
-collect_history("usstock-free-1d")
-
-free_sids = list_sids("usstock-free-1d")
-securities = get_securities(sids=free_sids)
-create_universe("usstock-free", sids=securities.index.tolist())
-```
-
-## Scheduler Runtime Notes
-
-The scheduler is in-process with the API process.
-- If API is down, scheduler is down.
-- Default poll interval is 1 day.
-- Due-job execution uses claim/lock semantics in DB to reduce duplicate execution risk.
-
-Env knobs:
-- `RECONCILE_SCHEDULER_ENABLED` (default `true`)
-- `RECONCILE_SCHEDULER_POLL_SECONDS` (default `60`) — how often the scheduler wakes up to check for due jobs. Must be ≤ the shortest `interval_seconds` of any reconcile job, otherwise jobs will run less frequently than configured.
-- `RECONCILE_SCHEDULER_WORKER_ID` (optional)
-
-## Testing
-
-Run all tests:
-```bash
-poetry run python -m unittest discover -s tests -p 'test_*.py'
-```
-
-## Frontend (Next.js Dashboard)
-
-Located in `frontend/portfolio-management/`.
-
-Features:
-- Portfolio list with return and strategy count
-- Portfolio detail page: pie chart of weights, performance chart (portfolio vs top 3 strategies)
-- Strategy weight editor (manual weight assignment with live rebalance)
-- AI pool selection via natural language prompt
-- Backtest page: configure method, rebalance frequency, date range, initial value; view return/Sharpe/drawdown metrics and daily value chart
-
-Setup:
 ```bash
 cd frontend/portfolio-management
 pnpm install
 pnpm dev
 ```
 
-Dashboard available at `http://localhost:3000`.
+Dashboard at `http://localhost:3000`.
 
-## Current Boundaries
+### 5. Seed the database (optional)
 
-- Risk constraints are basic (no built-in sector caps, turnover limits, or volatility targeting).
-- Scheduler is in-process; for production, consider Celery or a dedicated worker process.
-- Realtime data collection requires a QuantRocket license.
+```bash
+docker cp scripts/seed.py vhf-api:/app/seed.py
+docker exec vhf-api python /app/seed.py
+```
+
+---
+
+## Architecture
+
+```
+vhf/
+├── api/v1/
+│   ├── public.py          # Unauthenticated routes
+│   └── admin.py           # Admin routes (X-API-Key required)
+├── services/
+│   ├── allocation_service.py   # Weight computation
+│   ├── backtest.py             # Historical simulation engine
+│   ├── rebalance_engine.py     # Drift-threshold rebalancing
+│   ├── reconcile_service.py    # One-shot reconcile
+│   └── reconcile_scheduler.py  # Distributed periodic scheduler
+├── db/
+│   ├── initialise.py      # Schema creation / migrations
+│   └── operations.py      # All DB reads/writes
+├── ai/
+│   └── weight_allocator_provider.py  # Pluggable AI allocator
+└── quantrocket/
+    ├── backtest_sync.py   # QR Moonshot → price history ingestion
+    └── cli.py             # Trade execution via QR CLI
+```
+
+---
+
+## Core Features
+
+### Portfolio Management
+
+Create and manage portfolios of quantitative strategies.
+
+```
+POST /api/v1/select-pool          # Create portfolio from strategy list
+GET  /api/v1/portfolios           # List portfolios
+GET  /api/v1/strategies           # List strategies
+POST /api/v1/allocate-portfolio   # Compute target weights
+```
+
+### Allocation Methods
+
+| Method | Description |
+|---|---|
+| `equal_weight` | 1/N across all strategies |
+| `score_weighted` | Proportional to end-to-end momentum |
+| `manual` | Use stored portfolio weights |
+| `ai_weighted` | Claude API allocates weights given structured context |
+
+### Threshold-Based Rebalancing
+
+Rebalance only when drift exceeds a configurable threshold (no-trade zone). Grounded in Davis & Norman (1990) and Vanguard (2024) threshold rebalancing research.
+
+```
+POST /api/v1/rebalance-plan
+```
+
+### Distributed Reconcile Scheduler
+
+Recurring jobs with atomic DB claim/lock semantics to prevent duplicate execution across concurrent workers. Worker identity via `{hostname}:{pid}`.
+
+```
+POST /api/v1/admin/reconcile/jobs
+POST /api/v1/admin/reconcile/scheduler/start
+GET  /api/v1/admin/reconcile/scheduler/status
+```
+
+### Backtesting
+
+Simulate a portfolio strategy over historical price data stored in the DB. No look-ahead bias — weights at each rebalance date use only prices visible at that point.
+
+```
+POST /api/v1/admin/backtest
+GET  /api/v1/admin/backtest/{portfolio_id}/runs        # List saved runs
+GET  /api/v1/admin/backtest/{portfolio_id}/runs/{id}   # Load a saved run
+DELETE /api/v1/admin/backtest/{portfolio_id}/runs/{id} # Delete a saved run
+```
+
+Request fields:
+
+| Field | Default | Description |
+|---|---|---|
+| `portfolio_id` | required | Portfolio to simulate |
+| `method` | `equal_weight` | Allocation method |
+| `rebalance_frequency_days` | `21` | ~Monthly rebalancing |
+| `start_date` / `end_date` | auto | Optional ISO date clip |
+| `initial_value` | `100` | Starting portfolio value |
+| `live_ai_calls` | `false` | If true, call Claude at each rebalance (incurs API cost) |
+
+Results include `rebalance_history` — the weight allocation at every rebalance date, keyed by strategy ID — used to render the weight evolution chart and rebalance log in the UI.
+
+Every run is automatically persisted and appears in the "Past Runs" table on the backtest page.
+
+### Loading Price History from QuantRocket
+
+Before backtesting, each strategy needs historical price data. Trigger a QuantRocket Moonshot backtest and ingest the results:
+
+```
+POST /api/v1/admin/strategies/{strategy_id}/sync-backtest
+GET  /api/v1/admin/strategies/{strategy_id}/sync-backtest/{job_id}  # Poll status
+```
+
+This calls the houston HTTP gateway (`http://houston/moonshot/backtests.csv`), converts daily returns to a cumulative price series (indexed to 100), and writes it to `strategy_price_history`.
+
+Alternatively, POST price points directly:
+
+```
+POST /api/v1/admin/strategies/{strategy_id}/prices
+Body: { "points": [["2025-01-02", 100.0], ["2025-01-03", 101.2], ...] }
+```
+
+### Batch Evaluation Script
+
+Compare all portfolios across allocation methods and write a CSV + summary report:
+
+```bash
+# equal_weight and score_weighted (no API calls):
+poetry run python scripts/evaluate.py
+
+# Include live AI-weighted backtests:
+poetry run python scripts/evaluate.py --live-ai
+
+# Custom options:
+poetry run python scripts/evaluate.py \
+  --portfolio-ids 1,2 \
+  --methods equal_weight,score_weighted,ai_weighted \
+  --start-date 2025-01-02 \
+  --end-date 2025-12-31 \
+  --rebalance-days 21 \
+  --output-dir results/
+```
+
+Output: `results/backtest_results.csv` and `results/backtest_summary.txt`.
+
+> **Note:** Results in `results/` were generated against real QuantRocket Moonshot strategy backtests using historical market data. Re-running against different price data will produce different numbers.
+
+---
+
+## AI Integration
+
+### Pluggable Allocator Interface
+
+The AI allocator is a protocol (`WeightAllocatorProvider`) with tiered fallback:
+
+| Mode | Behaviour |
+|---|---|
+| `auto` | Try local (Claude API), then remote, then equal-weight |
+| `local` | Call Anthropic Claude API directly |
+| `remote` | POST context to `AI_ALLOCATOR_URL` |
+| `disabled` | Skip AI, fall back to equal-weight |
+
+Set via `AI_ALLOCATOR_MODE` in `.env`.
+
+Accepted response shapes from the AI:
+- `[w1, w2, ...]`
+- `{"weights": [...]}`
+- `{"allocations": {"SID1": 0.4, "SID2": 0.6}}`
+
+### Live AI Backtesting
+
+Set `live_ai_calls=true` to call Claude at each rebalance date during a backtest, using only prices visible at that point (no look-ahead). The result includes:
+
+- `ai_call_count` — number of successful Claude calls
+- `ai_fallback_count` — fallbacks to equal-weight on error
+- `weight_stability` — average per-strategy weight std dev across rebalances (lower = more consistent)
+
+### AI Pool Selection
+
+```
+POST /api/v1/ai-select-pool
+Body: { "portfolio_name": "...", "account": "...", "prompt": "I want equity momentum strategies" }
+```
+
+Uses `claude-sonnet-4-6` to select the best matching strategy pool from available strategies.
+
+---
+
+## Data Model
+
+| Table | Purpose |
+|---|---|
+| `portfolios` | Portfolio records with strategy list and weights |
+| `strategies` | Strategy metadata |
+| `portfolio_accounts` | Portfolio → broker account mapping |
+| `portfolio_allocations` | Allocation run audit trail |
+| `rebalance_runs` | Rebalance plan snapshots |
+| `reconcile_jobs` | Scheduled reconcile job definitions |
+| `strategy_price_history` | Per-strategy `(date, price)` series |
+| `backtest_results` | Persisted backtest runs (full result JSON) |
+
+SQLite file location: `DB_PATH` env var (default: `/app/data/vhf.db` in container, `./volumes/appdata/vhf.db` via volume mount).
+
+---
+
+## Authentication
+
+Admin routes (`/api/v1/admin/*`) require:
+
+```
+X-API-Key: <ADMIN_API_KEY>
+```
+
+- Missing key → `503 Service Unavailable`
+- Wrong key → `401 Unauthorized`
+
+---
+
+## Testing
+
+```bash
+poetry run python -m unittest discover -s tests -p 'test_*.py'
+```
+
+120+ tests across allocation, rebalance, reconcile, scheduler, selector, backtest, backtest sync, and persistence logic. All DB and network calls are mocked.
+
+---
+
+## Scheduler Notes
+
+The reconcile scheduler runs in-process with the API.
+
+| Env var | Default | Description |
+|---|---|---|
+| `RECONCILE_SCHEDULER_ENABLED` | `true` | Enable/disable on startup |
+| `RECONCILE_SCHEDULER_POLL_SECONDS` | `60` | Wake-up interval; must be ≤ shortest job interval |
+| `RECONCILE_SCHEDULER_WORKER_ID` | `{hostname}:{pid}` | Used for distributed lock claims |
+
+---
+
+## QuantRocket Setup (one-time, if using live data)
+
+1. Obtain a QuantRocket license at `https://www.quantrocket.com/account/`
+2. Start the full stack: `poetry run poe up-all`
+3. In the QuantRocket Jupyter environment (`http://localhost:8888`):
+
+```python
+from quantrocket.license import set_license
+from quantrocket.history import create_usstock_db, collect_history
+from quantrocket.master import get_securities, create_universe
+
+set_license("<YOUR_LICENSE_KEY>")
+create_usstock_db("usstock-free-1d", bar_size="1 day", free=True)
+collect_history("usstock-free-1d")
+```
+
+4. Run Moonshot backtests from the `intro_moonshot/` notebooks.
+5. Sync strategy price history via `POST /api/v1/admin/strategies/{id}/sync-backtest`.

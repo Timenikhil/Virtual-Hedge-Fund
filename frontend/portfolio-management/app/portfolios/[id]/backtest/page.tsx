@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { Component, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
-import { ArrowLeft, Play, AlertTriangle, Clock } from 'lucide-react';
+import { ArrowLeft, Play, AlertTriangle, Clock, Trash2 } from 'lucide-react';
 import {
     ComposedChart,
     Line,
@@ -22,6 +22,39 @@ const METHODS = [
     { value: 'ai_weighted', label: 'AI Weighted' },
     { value: 'manual', label: 'Manual (Current Weights)' },
 ];
+
+class BacktestErrorBoundary extends Component<
+    { children: React.ReactNode },
+    { hasError: boolean; message: string }
+> {
+    constructor(props: { children: React.ReactNode }) {
+        super(props);
+        this.state = { hasError: false, message: '' };
+    }
+    static getDerivedStateFromError(error: Error) {
+        return { hasError: true, message: error.message };
+    }
+    render() {
+        if (this.state.hasError) {
+            return (
+                <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+                    <div className="bg-white rounded-lg border border-red-200 p-8 max-w-md text-center">
+                        <AlertTriangle className="w-10 h-10 text-red-400 mx-auto mb-4" />
+                        <h2 className="text-lg font-semibold text-gray-800 mb-2">Something went wrong</h2>
+                        <p className="text-sm text-gray-500">{this.state.message || 'An unexpected error occurred on the backtest page.'}</p>
+                        <button
+                            onClick={() => this.setState({ hasError: false, message: '' })}
+                            className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700"
+                        >
+                            Try again
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+        return this.props.children;
+    }
+}
 
 function StatCard({
     label,
@@ -49,7 +82,7 @@ function StatCard({
     );
 }
 
-export default function BacktestPage() {
+function BacktestPageInner() {
     const params = useParams();
     const router = useRouter();
     const portfolioId = parseInt(params.id as string, 10);
@@ -65,6 +98,7 @@ export default function BacktestPage() {
     const [error, setError] = useState<string | null>(null);
     const [pastRuns, setPastRuns] = useState<BacktestRunSummary[]>([]);
     const [loadingRun, setLoadingRun] = useState<number | null>(null);
+    const [deletingRun, setDeletingRun] = useState<number | null>(null);
 
     useEffect(() => {
         portfolioAPI.listBacktestRuns(portfolioId).then(setPastRuns).catch(() => {});
@@ -104,6 +138,19 @@ export default function BacktestPage() {
             setError(e.message ?? 'Failed to load run');
         } finally {
             setLoadingRun(null);
+        }
+    };
+
+    const deleteRun = async (runId: number) => {
+        setDeletingRun(runId);
+        try {
+            await portfolioAPI.deleteBacktestRun(portfolioId, runId);
+            setPastRuns(prev => prev.filter(r => r.id !== runId));
+            if (result && (result as any).__runId === runId) setResult(null);
+        } catch (e: any) {
+            setError(e.message ?? 'Failed to delete run');
+        } finally {
+            setDeletingRun(null);
         }
     };
 
@@ -290,13 +337,23 @@ export default function BacktestPage() {
                                                     {run.max_drawdown_pct != null ? `${run.max_drawdown_pct.toFixed(2)}%` : '—'}
                                                 </td>
                                                 <td className="py-2 text-right">
-                                                    <button
-                                                        onClick={() => loadRun(run.id)}
-                                                        disabled={loadingRun === run.id}
-                                                        className="text-indigo-600 hover:text-indigo-800 text-xs font-medium disabled:opacity-50"
-                                                    >
-                                                        {loadingRun === run.id ? 'Loading…' : 'Load'}
-                                                    </button>
+                                                    <div className="flex items-center justify-end gap-3">
+                                                        <button
+                                                            onClick={() => loadRun(run.id)}
+                                                            disabled={loadingRun === run.id || deletingRun === run.id}
+                                                            className="text-indigo-600 hover:text-indigo-800 text-xs font-medium disabled:opacity-50"
+                                                        >
+                                                            {loadingRun === run.id ? 'Loading…' : 'Load'}
+                                                        </button>
+                                                        <button
+                                                            onClick={() => deleteRun(run.id)}
+                                                            disabled={deletingRun === run.id || loadingRun === run.id}
+                                                            className="text-red-400 hover:text-red-600 disabled:opacity-50"
+                                                            title="Delete run"
+                                                        >
+                                                            <Trash2 className="w-3.5 h-3.5" />
+                                                        </button>
+                                                    </div>
                                                 </td>
                                             </tr>
                                         ))}
@@ -561,5 +618,13 @@ export default function BacktestPage() {
                 </div>
             </div>
         </ProtectedRoute>
+    );
+}
+
+export default function BacktestPage() {
+    return (
+        <BacktestErrorBoundary>
+            <BacktestPageInner />
+        </BacktestErrorBoundary>
     );
 }

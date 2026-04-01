@@ -288,6 +288,15 @@ export const portfolioAPI = {
         return response.json();
     },
 
+    deleteBacktestRun: async (portfolioId: number, runId: number): Promise<void> => {
+        const apiKey = process.env.NEXT_PUBLIC_ADMIN_API_KEY ?? '';
+        const response = await fetch(`${API_BASE_URL}/admin/backtest/${portfolioId}/runs/${runId}`, {
+            method: 'DELETE',
+            headers: { 'X-API-Key': apiKey },
+        });
+        if (!response.ok) throw new Error('Failed to delete backtest run');
+    },
+
     selectPool: async (data: PortfolioRequest): Promise<number> => {
         const response = await fetch(`${API_BASE_URL}/select-pool`, {
             method: 'POST',
