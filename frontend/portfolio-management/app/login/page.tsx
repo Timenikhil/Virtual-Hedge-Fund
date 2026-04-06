@@ -41,6 +41,11 @@ export default function LoginPage() {
         <div className="min-h-screen flex items-center justify-center bg-gray-50">
             <div className="max-w-md w-full space-y-8 p-8 bg-white rounded-lg shadow-md">
                 <div>
+                    <img
+                        src="/logo.png"
+                        alt="Company Logo"
+                        className="mx-auto h-16 w-auto mb-4"
+                    />
                     <h2 className="text-3xl font-bold text-center">
                         {isSignUp ? 'Create Account' : 'Sign In'}
                     </h2>
