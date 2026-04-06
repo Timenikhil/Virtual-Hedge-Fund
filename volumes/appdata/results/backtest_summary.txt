@@ -1,6 +1,6 @@
 ================================================================================
 VHF BACKTEST EVALUATION SUMMARY
-Generated: 2026-04-06T06:10:47.209272+00:00
+Generated: 2026-04-06T06:43:49.339039+00:00
 ================================================================================
 
 Rebalance frequency : 21 trading days
@@ -11,20 +11,20 @@ Portfolio: Alpha Fund
 ------------------------------------------------------------
   equal_weight          return=   696.48%  sharpe=    0.57  drawdown=   -84.51%  HHI=  0.2000
   score_weighted        return=   779.32%  sharpe=    0.59  drawdown=   -88.34%  HHI=  0.2554
-  ai_weighted           return=   747.16%  sharpe=    0.57  drawdown=   -87.41%  HHI=  0.2831
-    → AI calls=255  fallbacks=0  weight_stability=0.1158
+  ai_weighted           return=   899.13%  sharpe=    0.57  drawdown=   -86.29%  HHI=  0.2051
+    → AI calls=255  fallbacks=0  weight_stability=0.1282
 
   vs equal_weight baseline:
     score_weighted        Δreturn=   82.84pp  Δsharpe=   0.023
-    ai_weighted           Δreturn=   50.68pp  Δsharpe=   0.002
+    ai_weighted           Δreturn=  202.65pp  Δsharpe=   0.007
 
 Portfolio: Diversified Fund
 ------------------------------------------------------------
   equal_weight          return=   512.26%  sharpe=    0.63  drawdown=   -76.68%  HHI=  0.1000
   score_weighted        return=   460.54%  sharpe=    0.68  drawdown=   -83.63%  HHI=  0.1390
-  ai_weighted           return=   339.82%  sharpe=    0.63  drawdown=   -83.53%  HHI=  0.1713
-    → AI calls=174  fallbacks=0  weight_stability=0.0855
+  ai_weighted           return=   397.02%  sharpe=    0.65  drawdown=   -84.29%  HHI=  0.1227
+    → AI calls=174  fallbacks=0  weight_stability=0.0656
 
   vs equal_weight baseline:
     score_weighted        Δreturn=  -51.72pp  Δsharpe=   0.053
-    ai_weighted           Δreturn= -172.43pp  Δsharpe=   0.009
+    ai_weighted           Δreturn= -115.24pp  Δsharpe=   0.029
