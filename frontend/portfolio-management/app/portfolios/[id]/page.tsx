@@ -80,7 +80,7 @@ export default function PortfolioDetailPage() {
 
     const pieData = portfolio.strategies.map(s => ({
         name: s.name,
-        value: s.weight
+        value: parseFloat(s.weight.toFixed(2)),
     }));
 
     return (
@@ -126,7 +126,7 @@ export default function PortfolioDetailPage() {
                                         cx="50%"
                                         cy="50%"
                                         labelLine={false}
-                                        label={({ name, value }) => `${name}: ${value}%`}
+                                        label={({ name, value }) => `${name}: ${value.toFixed(2)}%`}
                                         outerRadius={100}
                                         fill="#8884d8"
                                         dataKey="value"

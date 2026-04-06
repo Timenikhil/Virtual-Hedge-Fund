@@ -128,7 +128,7 @@ export default function StrategyWeightEditor({
                                 <span className="text-lg font-semibold">%</span>
                             </div>
                         ) : (
-                            <span className="text-lg font-semibold">{strategy.weight}%</span>
+                            <span className="text-lg font-semibold">{strategy.weight.toFixed(2)}%</span>
                         )}
                     </div>
                 ))}
