@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import math
 from datetime import datetime, timezone
+
+from vhf.services.backtest import _compute_strategy_metrics  # shared metrics helper
 from typing import Any
 
 from vhf.ai.weight_allocator_provider import (
@@ -102,9 +104,7 @@ def _build_strategy_context(strategy_id: str) -> dict[str, Any]:
         "name": strategy.name,
         "description": strategy.description,
         "category": strategy.category,
-        "prices": prices,
-        "latest_price": prices[-1] if prices else None,
-        "price_count": len(prices),
+        "metrics": _compute_strategy_metrics(prices),
     }
 
 

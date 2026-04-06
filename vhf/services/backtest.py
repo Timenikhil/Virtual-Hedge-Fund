@@ -170,6 +170,72 @@ def _max_drawdown(values: list[float]) -> float:
     return max_dd * 100.0  # percent, negative
 
 
+def _compute_strategy_metrics(prices: list[float]) -> dict[str, Any]:
+    """
+    Compute performance metrics from a cumulative price series (daily frequency).
+    All return figures are in percent. Volatility and Sharpe are annualised.
+    Returns an empty dict if prices is empty.
+    """
+    n = len(prices)
+    if n == 0:
+        return {}
+
+    def _period_return(lookback: int) -> float | None:
+        if n < lookback + 1:
+            return None
+        start = prices[-(lookback + 1)]
+        return round((prices[-1] - start) / start * 100, 2) if start else None
+
+    def _daily_returns(lookback: int) -> list[float]:
+        window = prices[-(lookback + 1):]
+        return [
+            (window[i] - window[i - 1]) / window[i - 1]
+            for i in range(1, len(window))
+            if window[i - 1] != 0
+        ]
+
+    def _annualised_vol(lookback: int) -> float | None:
+        rets = _daily_returns(lookback)
+        if len(rets) < 2:
+            return None
+        mean = sum(rets) / len(rets)
+        var = sum((r - mean) ** 2 for r in rets) / (len(rets) - 1)
+        return round(math.sqrt(var * 252) * 100, 2)
+
+    def _sharpe(lookback: int) -> float | None:
+        rets = _daily_returns(lookback)
+        if len(rets) < 2:
+            return None
+        mean = sum(rets) / len(rets)
+        var = sum((r - mean) ** 2 for r in rets) / (len(rets) - 1)
+        if var == 0:
+            return None
+        return round(mean / math.sqrt(var) * math.sqrt(252), 3)
+
+    def _max_drawdown() -> float:
+        peak, max_dd = prices[0], 0.0
+        for p in prices:
+            if p > peak:
+                peak = p
+            if peak > 0:
+                max_dd = min(max_dd, (p - peak) / peak * 100)
+        return round(max_dd, 2)
+
+    cum_start = prices[0]
+    cumulative = round((prices[-1] - cum_start) / cum_start * 100, 2) if cum_start else None
+
+    return {
+        "return_20d_pct":   _period_return(20),
+        "return_63d_pct":   _period_return(63),
+        "return_252d_pct":  _period_return(252),
+        "return_cum_pct":   cumulative,
+        "vol_63d_ann_pct":  _annualised_vol(63),
+        "sharpe_252d":      _sharpe(252),
+        "max_drawdown_pct": _max_drawdown(),
+        "n_periods":        n,
+    }
+
+
 def _build_backtest_ai_context(
     strategy_ids: list[str],
     strategy_meta: dict[str, dict],
@@ -187,9 +253,7 @@ def _build_backtest_ai_context(
             "name": meta.get("name", sid),
             "category": meta.get("category", ""),
             "description": meta.get("description", ""),
-            "prices": prices[-20:] if len(prices) > 20 else prices,
-            "latest_price": prices[-1] if prices else None,
-            "price_count": len(prices),
+            "metrics": _compute_strategy_metrics(prices),
         })
 
     ctx: dict[str, Any] = {
