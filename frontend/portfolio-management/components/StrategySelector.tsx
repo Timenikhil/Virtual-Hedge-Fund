@@ -8,6 +8,7 @@ export interface Strategy {
     name: string;
     description: string;
     category: string;
+    source?: string;
 }
 
 interface StrategySelectorProps {
@@ -106,9 +107,14 @@ export const StrategySelector: React.FC<StrategySelectorProps> = ({
                                 </div>
                             </div>
                             <p className="text-xs text-gray-600 mb-2">{strategy.description}</p>
-                            <span className="inline-block px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded">
-                {strategy.category}
-              </span>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="inline-block px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded">
+                                    {strategy.category}
+                                </span>
+                                {strategy.source === 'quantrocket' && (
+                                    <span className="inline-block px-2 py-1 bg-amber-100 text-amber-700 text-xs rounded font-medium">QR</span>
+                                )}
+                            </div>
                         </div>
                     );
                 })}

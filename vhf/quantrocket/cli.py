@@ -3,22 +3,39 @@ import subprocess
 from typing import Iterable
 import json
 
+from vhf.logging.log import logger
+
 # Defaults can be overridden via env vars.
 COMPOSE_DIR = os.getenv("QUANTROCKET_COMPOSE_DIR", ".")
 COMPOSE_FILE = os.getenv("QUANTROCKET_COMPOSE_FILE", "docker-compose.quantrocket.yml")
 MOONSHOT_SERVICE = os.getenv("QUANTROCKET_MOONSHOT_SERVICE", "moonshot")
+
+# Hard limit on captured output to prevent OOM on unexpectedly large CLI responses.
+MAX_OUTPUT_BYTES = int(os.getenv("QUANTROCKET_MAX_OUTPUT_BYTES", str(50 * 1024 * 1024)))  # 50 MB
 
 
 class QuantRocketCliError(RuntimeError):
     pass
 
 
+def _validate_compose_file() -> str:
+    """Return the absolute compose file path, warning if it does not exist."""
+    compose_path = os.path.join(COMPOSE_DIR, COMPOSE_FILE)
+    if not os.path.exists(compose_path):
+        logger.warning(
+            "QuantRocket compose file not found at '%s'. "
+            "CLI commands will fail until the file is present.",
+            compose_path,
+        )
+    return compose_path
+
+
 def _run_compose_exec(args: Iterable[str], *, timeout: int = 600) -> str:
     """
     Execute a command inside the QuantRocket moonshot container via docker compose.
-    Returns stdout, raises on non-zero exit.
+    Returns stdout, raises on non-zero exit or oversized output.
     """
-    compose_path = os.path.join(COMPOSE_DIR, COMPOSE_FILE)
+    compose_path = _validate_compose_file()
     cmd = ["docker", "compose", "-f", compose_path, "exec", "-T", MOONSHOT_SERVICE]
     cmd.extend(args)
     try:
@@ -37,6 +54,14 @@ def _run_compose_exec(args: Iterable[str], *, timeout: int = 600) -> str:
         raise QuantRocketCliError(
             f"QuantRocket CLI failed (exit {proc.returncode}): {proc.stderr or proc.stdout}"
         )
+
+    output_size = len(proc.stdout.encode("utf-8", errors="replace"))
+    if output_size > MAX_OUTPUT_BYTES:
+        raise QuantRocketCliError(
+            f"QuantRocket CLI output exceeded size limit "
+            f"({output_size} bytes > {MAX_OUTPUT_BYTES} bytes)."
+        )
+
     return proc.stdout
 
 
@@ -74,6 +99,7 @@ def moonshot_trade(
     if accounts:
         args.extend(["--accounts", ",".join(accounts)])
     return _run_compose_exec(args)
+
 
 
 def realtime_create_tick_db(

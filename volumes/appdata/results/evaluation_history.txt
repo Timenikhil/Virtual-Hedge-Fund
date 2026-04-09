@@ -1,0 +1,192 @@
+================================================================================
+VHF AI ALLOCATOR — EVALUATION HISTORY
+================================================================================
+
+This file documents all backtest evaluation runs in chronological order,
+including the AI context design at each stage. Intended as a research diary
+showing the iterative improvement of the AI allocator prompt/context.
+
+================================================================================
+RUN 1 — 2026-04-01  (Iteration 0: baseline, synthetic data, broken context)
+================================================================================
+
+Commit     : 9bad52f
+Data source: GBM synthetic prices (scripts/seed.py)
+             Geometric Brownian Motion with per-strategy drift/vol parameters.
+             NOT real market data — prices are statistically plausible but
+             have no regime changes, correlations, or real market events.
+Date range : 2025-01-02 → 2025-12-19  (251 trading days, ~1 year)
+Portfolios : 6 (Aggressive Growth, All-Weather Diversified, Alpha Fund,
+               Defensive Income, Diversified Fund, Market Neutral)
+AI context : BROKEN — last 20 prices passed as raw array.
+             _build_prompt() computed pct_change over the 20-price slice
+             but labelled it "over N periods" (N = full history length).
+             Claude believed it was seeing e.g. "+3.2% over 5250 periods"
+             when it was actually the 20-day return.
+             No risk metrics (Sharpe, vol, drawdown) provided.
+             Effective signal: 20-day momentum noise, mislabelled.
+
+AI RESULTS vs equal_weight:
+  Aggressive Growth    : ai_weighted  +4.54pp  (EW=53.6%,  AI=58.1%)
+  All-Weather Divs     : ai_weighted +16.74pp  (EW=21.4%,  AI=38.1%)
+  Alpha Fund           : ai_weighted  -1.47pp  (EW=14.0%,  AI=12.5%)
+  Defensive Income     : ai_weighted  +5.12pp  (EW= 2.3%,  AI= 7.4%)
+  Diversified Fund     : ai_weighted  +2.99pp  (EW=14.4%,  AI=17.4%)
+  Market Neutral       : ai_weighted  +4.41pp  (EW= 4.1%,  AI= 8.5%)
+
+  AI beats EW: 5/6 portfolios
+
+Note: Results are NOT reliable — 1-year GBM data has no statistical power.
+      Sharpe ratios are artificially high (2–3+) due to smooth synthetic paths.
+      Results discarded in favour of real market data (Run 2 onwards).
+
+--------------------------------------------------------------------------------
+
+================================================================================
+RUN 2 — 2026-04-06 06:10 UTC  (Iteration 1: real data, context still broken)
+================================================================================
+
+Commit     : 866ade6
+Data source: Real ETF prices via yfinance (scripts/seed_real.py)
+             10 strategies mapped to ETF proxies (MTUM, RSP, EFA, IVE,
+             QUAL, USMV, XLK, TLT, LQD, SVXY). Fallback tickers used for
+             ETFs that launched after 2005.
+Date range : 2005-01-03 → 2026-04-02  (~21 years, 5350 trading days)
+             Covers: GFC (2008), European debt crisis (2011), COVID (2020),
+             2022 rate hike cycle.
+Portfolios : 2 (Alpha Fund pid=31, Diversified Fund pid=32)
+AI context : STILL BROKEN — same 20-price slice bug as Run 1.
+             Only change: underlying prices are now real market data.
+
+AI RESULTS vs equal_weight:
+  Alpha Fund           : ai_weighted  +50.68pp  (EW=696%, AI=747%)
+  Diversified Fund     : ai_weighted -172.43pp  (EW=512%, AI=340%)
+
+  AI beats EW: 1/2 portfolios
+
+Key insight from this run:
+  With real data, the Diversified Fund result is strikingly bad (-172pp).
+  Diagnosis: AI is underweighting TLT and LQD (which had strong long-run
+  returns pre-2022) based on 20-day momentum signals that happened to
+  catch them in drawdown. The mislabelled context made this worse.
+
+--------------------------------------------------------------------------------
+
+================================================================================
+RUN 3 — 2026-04-06 06:43 UTC  (Iteration 2: real data, fixed context)
+================================================================================
+
+Commit     : d0e8c8b
+Data source: Same real ETF prices as Run 2
+Date range : 2005-01-03 → 2026-04-02
+Portfolios : 2 (Alpha Fund pid=31, Diversified Fund pid=32)
+
+Context fix:
+  Replaced raw 20-price slice with computed performance metrics:
+    - return_20d_pct   : 20-day return
+    - return_63d_pct   : 3-month return
+    - return_252d_pct  : 1-year return
+    - return_cum_pct   : full-history cumulative return
+    - vol_63d_ann_pct  : annualised 63-day volatility
+    - sharpe_252d      : annualised 1-year Sharpe ratio
+    - max_drawdown_pct : maximum drawdown over full history
+
+  Prompt rewritten as a formatted metrics table:
+    Strategy       Category   1M Ret  3M Ret  1Y Ret  Cum Ret  Vol63d  Sharpe1Y  MaxDD
+    mom_us_large   equity     -0.39%  -1.69%  +24.05% +771.07%  24.29%    +2.15  -89.28%
+    ...
+
+  System prompt updated with explicit allocation guidance:
+    "Favour strategies with higher Sharpe ratio, stronger recent momentum,
+     lower drawdown for their return level."
+
+AI RESULTS vs equal_weight:
+  Alpha Fund           : ai_weighted +202.65pp  (EW=696%, AI=899%)  ← +152pp vs Run 2
+  Diversified Fund     : ai_weighted -115.24pp  (EW=512%, AI=397%)  ← +57pp vs Run 2
+
+  AI beats EW: 1/2 portfolios (same count, but dramatically better magnitude)
+
+Key insight:
+  Alpha Fund improvement (+152pp) confirms the context fix was material.
+  Diversified Fund still loses — the fix helps but does not solve the
+  fundamental problem that 1/N is hard to beat on diverse cross-asset sets.
+
+--------------------------------------------------------------------------------
+
+================================================================================
+RUN 4 — 2026-04-06 10:37 UTC  (Final: 4 new portfolios, same improved context)
+================================================================================
+
+Commit     : 24445db
+Data source: Same real ETF prices as Runs 2–3
+Date range : auto → auto (2005 for 8 strategies, 2011 for low_vol_factor/vol_arb)
+Portfolios : 4 new (Momentum Trio pid=33, Factor Blend pid=34,
+                    Balanced Core pid=35, Alternatives pid=36)
+AI context : Same improved metrics table as Run 3 (no further changes)
+
+Portfolio designs and hypotheses tested:
+  Momentum Trio  (mom_us_large, sector_rotation, trend_intl)
+    Hypothesis: Can AI rotate among correlated momentum strategies?
+    All equity momentum — tests relative rotation, not diversification.
+
+  Factor Blend   (quality_factor, val_factor_us, low_vol_factor, mean_rev_us)
+    Hypothesis: AI adds value when strategy Sharpe ratios are tightly clustered?
+    Low return dispersion — hardest relative allocation problem.
+
+  Balanced Core  (mom_us_large, quality_factor, rates_macro, credit_ls)
+    Hypothesis: Can AI do regime-aware equity/bond tilting?
+    Cross-asset — tests if AI can act as a dynamic 60/40 allocator.
+
+  Alternatives   (vol_arb, credit_ls, rates_macro)
+    Hypothesis: AI on pure defensive/alternatives with limited data?
+    Data from 2011 (vol_arb constraint). Lowest return dispersion.
+
+AI RESULTS vs equal_weight:
+  Momentum Trio        : ai_weighted +222.35pp  (EW=730%, AI=952%)  ← best result
+  Factor Blend         : ai_weighted   +7.38pp  (EW=417%, AI=424%)  ← near-neutral
+  Balanced Core        : ai_weighted -146.84pp  (EW=391%, AI=245%)  ← poor
+  Alternatives         : ai_weighted -210.31pp  (EW=354%, AI=144%)  ← worst result
+
+  AI beats EW: 2/4 new, 3/6 total across all runs
+
+Total API calls: 863 live Claude calls, 0 fallbacks across all 6 portfolios.
+
+================================================================================
+SUMMARY: AI ALLOCATOR ITERATION RESULTS
+================================================================================
+
+Context Version  | Alpha Fund AI vs EW | Diversified Fund AI vs EW
+-----------------+---------------------+---------------------------
+Run 1 (GBM,broken)  |     -1.47pp         |     +2.99pp
+Run 2 (real,broken) |    +50.68pp         |   -172.43pp
+Run 3 (real,fixed)  |   +202.65pp         |   -115.24pp
+
+Alpha Fund improvement from Run 1→3: +204pp
+Diversified Fund improvement from Run 2→3: +57pp
+
+================================================================================
+CONCLUSIONS AND OPEN QUESTIONS
+================================================================================
+
+What works:
+  - AI allocation adds clear value on homogeneous equity portfolios where
+    strategies have high return dispersion and the AI can exploit relative
+    Sharpe/momentum differences (Momentum Trio +222pp, Alpha Fund +203pp).
+  - The metrics-based context (Run 3 fix) was the single most impactful
+    change — going from +51pp to +203pp on Alpha Fund.
+  - Infrastructure held: 863 Claude API calls, 0 fallbacks, 0 errors.
+
+What does not work:
+  - Cross-asset and alternatives portfolios: AI consistently underperforms
+    equal-weight. Root cause: AI lacks macro regime context and overweights
+    recent momentum at the expense of long-run diversification value.
+  - Factor Blend: near-neutral result (+7pp). When strategy Sharpe ratios
+    are clustered (no clear winner), AI signal is too weak to add value.
+
+Open questions for future work:
+  1. Would adding a current date / market regime label to the AI context
+     help on cross-asset portfolios? (e.g. "current macro regime: rate hike")
+  2. Does a longer Sharpe lookback (e.g. 504d / 2yr) outperform 252d?
+  3. Would temperature=0 (deterministic Claude responses) reduce weight
+     churn and improve weight_stability without hurting returns?
+  4. Does prompt-chaining (show Claude prior allocations) reduce churn?

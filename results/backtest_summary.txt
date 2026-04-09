@@ -1,0 +1,74 @@
+================================================================================
+VHF BACKTEST EVALUATION SUMMARY
+Generated: 2026-04-01T10:00:08.853513+00:00
+================================================================================
+
+Rebalance frequency : 21 trading days
+Date range          : auto → auto
+Live AI calls       : yes
+
+Portfolio: Aggressive Growth
+------------------------------------------------------------
+  equal_weight          return=    53.57%  sharpe=    3.02  drawdown=    -6.95%  HHI=  0.3337
+  score_weighted        return=    51.94%  sharpe=    2.95  drawdown=    -7.45%  HHI=  0.3350
+  ai_weighted           return=    58.11%  sharpe=    2.48  drawdown=   -11.98%  HHI=  0.4362
+    → AI calls=12  fallbacks=0  weight_stability=0.2206
+
+  vs equal_weight baseline:
+    score_weighted        Δreturn=   -1.63pp  Δsharpe=  -0.075
+    ai_weighted           Δreturn=    4.54pp  Δsharpe=  -0.540
+
+Portfolio: All-Weather Diversified
+------------------------------------------------------------
+  equal_weight          return=    21.39%  sharpe=    3.24  drawdown=    -2.23%  HHI=  0.1251
+  score_weighted        return=    22.39%  sharpe=    3.20  drawdown=    -2.45%  HHI=  0.1302
+  ai_weighted           return=    38.13%  sharpe=    2.94  drawdown=    -6.83%  HHI=  0.2100
+    → AI calls=12  fallbacks=0  weight_stability=0.0994
+
+  vs equal_weight baseline:
+    score_weighted        Δreturn=    1.00pp  Δsharpe=  -0.036
+    ai_weighted           Δreturn=   16.74pp  Δsharpe=  -0.304
+
+Portfolio: Alpha Fund
+------------------------------------------------------------
+  equal_weight          return=    14.00%  sharpe=    1.83  drawdown=    -8.45%  HHI=  0.2000
+  score_weighted        return=    13.52%  sharpe=    1.78  drawdown=    -8.65%  HHI=  0.2019
+  ai_weighted           return=    12.53%  sharpe=    1.43  drawdown=   -10.29%  HHI=  0.2963
+    → AI calls=12  fallbacks=0  weight_stability=0.1303
+
+  vs equal_weight baseline:
+    score_weighted        Δreturn=   -0.49pp  Δsharpe=  -0.059
+    ai_weighted           Δreturn=   -1.47pp  Δsharpe=  -0.405
+
+Portfolio: Defensive Income
+------------------------------------------------------------
+  equal_weight          return=     2.29%  sharpe=    0.42  drawdown=    -8.32%  HHI=  0.3336
+  score_weighted        return=     2.37%  sharpe=    0.44  drawdown=    -7.71%  HHI=  0.3371
+  ai_weighted           return=     7.41%  sharpe=    1.16  drawdown=    -4.05%  HHI=  0.4354
+    → AI calls=12  fallbacks=0  weight_stability=0.1851
+
+  vs equal_weight baseline:
+    score_weighted        Δreturn=    0.08pp  Δsharpe=   0.024
+    ai_weighted           Δreturn=    5.12pp  Δsharpe=   0.748
+
+Portfolio: Diversified Fund
+------------------------------------------------------------
+  equal_weight          return=    14.38%  sharpe=    2.54  drawdown=    -5.74%  HHI=  0.1002
+  score_weighted        return=    13.83%  sharpe=    2.43  drawdown=    -5.79%  HHI=  0.1014
+  ai_weighted           return=    17.37%  sharpe=    2.20  drawdown=    -6.53%  HHI=  0.1973
+    → AI calls=12  fallbacks=0  weight_stability=0.0874
+
+  vs equal_weight baseline:
+    score_weighted        Δreturn=   -0.55pp  Δsharpe=  -0.107
+    ai_weighted           Δreturn=    2.99pp  Δsharpe=  -0.336
+
+Portfolio: Market Neutral
+------------------------------------------------------------
+  equal_weight          return=     4.13%  sharpe=    0.80  drawdown=    -5.22%  HHI=  0.3335
+  score_weighted        return=     3.90%  sharpe=    0.77  drawdown=    -4.98%  HHI=  0.3349
+  ai_weighted           return=     8.54%  sharpe=    1.38  drawdown=    -4.62%  HHI=  0.5069
+    → AI calls=12  fallbacks=0  weight_stability=0.2714
+
+  vs equal_weight baseline:
+    score_weighted        Δreturn=   -0.23pp  Δsharpe=  -0.024
+    ai_weighted           Δreturn=    4.41pp  Δsharpe=   0.584
