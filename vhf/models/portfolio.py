@@ -17,9 +17,25 @@ class PortfolioList(BaseModel):
     portfolios: List[Portfolio]
 
 class PortfolioSelector(str,Enum):
-    topk = "topk"
-    bottomk = "bottomk"
+    top = "top"        # top k strategies
+    bottom = "bottom"  # bottom k strategies
+    corr = "corr"      # at most k correlation
+    max = "max"        # choose those with errors at most k
     ai = "ai"  # allows ai to choose selection strategy
+
+class PortfolioRanker(str,Enum):
+    arima = "ARIMA"
+    lssvm = "LSSVM"
+    expert = "EXPERT"
+    xai = "XAI"
+
+class PortfolioRebalancer(str,Enum):
+    equal = "EQUAL"
+    mvo = "MVO"
+    arima = "ARIMA"
+    lssvm = "LSSVM"
+    expert = "EXPERT"
+    xai = "XAI"
 
 class PortfolioCreationRequest(BaseModel):
     portfolio_name: str
@@ -35,3 +51,4 @@ class PortfolioWeights(PortfolioID):
 class PortfolioSelectorRequest(PortfolioID) :
     selector : PortfolioSelector | None = None,
     k:int = 10
+    ranker : PortfolioRanker = PortfolioRanker.xai

@@ -22,6 +22,12 @@ CREATE TABLE IF NOT EXISTS strategies (SID TEXT PRIMARY KEY,
                                        P4 INTEGER NOT NULL,
                                        P5 INTEGER NOT NULL);
 
+-- portfolio weights history
+CREATE TABLE IF NOT EXISTS phistory(PID INTEGER REFERENCES portfolios(PID),
+                                    TIME INTEGER,-- unix time
+                                    WEIGHTS TEXT,
+                                    PRIMARY KEY (PID,TIME));
+
 --QR
 CREATE TABLE IF NOT EXISTS portfolio_accounts (PID INTEGER PRIMARY KEY,
                                                ACCOUNT TEXT NOT NULL,

@@ -67,7 +67,7 @@ async def select_portfolio(portfolioReq : PortfolioSelectorRequest) -> List[str]
     :param selector:
     :return:
     """
-    strategies = selectorStrat(get_sids(portfolioReq.portfolio_id),portfolioReq.selector,portfolioReq.k)
+    strategies = selectorStrat(get_sids(portfolioReq.portfolio_id),portfolioReq.selector,portfolioReq.k,portfolioReq.ranker.value)
     update_portfolio_strats(portfolioID=portfolioReq.portfolio_id,strats=strategies)
     return strategies
 

@@ -34,7 +34,8 @@ export const portfolioAPI = {
     getStrategies: async(): Promise<Strategy[]> => {
         const response = await fetch(`${API_BASE_URL}/strategies`, {
             method: 'GET',
-            headers: { 'Content-Type': 'application/json' }
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include'
         });
         if (!response.ok) throw new Error('Failed to retrieve strategies');
         const strats = await response.json();
@@ -44,7 +45,8 @@ export const portfolioAPI = {
     getPortfolios: async(): Promise<Portfolios> => {
             const response = await fetch(`${API_BASE_URL}/portfolios`, {
                 method: 'GET',
-                headers: { 'Content-Type': 'application/json' }
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include'
             });
 
             if (!response.ok) throw new Error('Failed to fetch portfolios');
@@ -102,7 +104,8 @@ export const portfolioAPI = {
         const response = await fetch(`${API_BASE_URL}/portfolio_id`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({portfolio_id})
+            body: JSON.stringify({portfolio_id}),
+            credentials: 'include'
         });
         if (!response.ok) throw new Error('Failed to fetch portfolio');
         const port = await response.json();
@@ -181,7 +184,8 @@ export const portfolioAPI = {
         const response = await fetch(`${API_BASE_URL}/portfolio_id`, {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({portfolio_id})
+            body: JSON.stringify({portfolio_id}),
+            credentials: 'include'
         });
         if (!response.ok) throw new Error('Failed to delete portfolio');
     },
@@ -190,7 +194,8 @@ export const portfolioAPI = {
         const response = await fetch(`${API_BASE_URL}/select-pool`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data)
+            body: JSON.stringify(data),
+            credentials: 'include'
         });
         if (!response.ok) throw new Error('Failed to select pool');
         return await response.json();
@@ -200,7 +205,8 @@ export const portfolioAPI = {
         const response = await fetch(`${API_BASE_URL}/ai-select-pool`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ portfolio_name: poolName, account, prompt: prompt || null })
+            body: JSON.stringify({ portfolio_name: poolName, account, prompt: prompt || null }),
+            credentials: 'include'
         });
         if (!response.ok) throw new Error('Failed to AI select pool');
         return await response.json();
@@ -214,7 +220,8 @@ export const portfolioAPI = {
                 portfolio_id,
                 selector: selector || null,
                 k: k || null
-            })
+            }),
+            credentials: 'include'
         });
         if (!response.ok) throw new Error('Failed to select portfolio');
         return await response.json();
@@ -224,7 +231,8 @@ export const portfolioAPI = {
         const response = await fetch(`${API_BASE_URL}/ai-select-portfolio`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ portfolio_id })
+            body: JSON.stringify({ portfolio_id }),
+            credentials: 'include'
         });
         if (!response.ok) throw new Error('Failed to AI select portfolio');
         return await response.json();
@@ -234,7 +242,8 @@ export const portfolioAPI = {
         const response = await fetch(`${API_BASE_URL}/choose-portfolio`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ portfolio_id, strategies })
+            body: JSON.stringify({ portfolio_id, strategies }),
+            credentials: 'include'
         });
         if (!response.ok) throw new Error('Failed to choose portfolio');
     },
@@ -246,7 +255,8 @@ export const portfolioAPI = {
         const response = await fetch(`${API_BASE_URL}/seed-portfolio`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ portfolio_id, weights: normalizedWeights })
+            body: JSON.stringify({ portfolio_id, weights: normalizedWeights }),
+            credentials: 'include'
         });
         if (!response.ok) throw new Error('Failed to seed portfolio');
     }

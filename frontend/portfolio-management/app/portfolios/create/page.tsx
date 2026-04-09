@@ -31,7 +31,7 @@ export default function PortfolioManagement() {
     const [strategies, setStrategies] = useState<Strategy[]>(INITIAL_STRATEGIES);
     const [selectedStrategies, setSelectedStrategies] = useState<string[]>([]);
     const [aiPrompt, setAiPrompt] = useState('');
-    const [selector, setSelector] = useState<string | null>('topk');
+    const [selector, setSelector] = useState<string | null>('top');
     const [selectorK, setSelectorK] = useState<number | null>(10);
     const [weights, setWeights] = useState<number[]>([]);
 
@@ -245,8 +245,10 @@ export default function PortfolioManagement() {
                                         className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                                     >
                                         <option value="">No Selector</option>
-                                        <option value="topk">Top K</option>
-                                        <option value="bottomk">Bottom K</option>
+                                        <option value="top">Top K</option>
+                                        <option value="bottom">Bottom K</option>
+                                        <option value="corr">Max Corr K</option>
+                                        <option value="max">Max Error K</option>
                                         <option value="ai">AI Selection</option>
                                     </select>
                                     {selector && selector !== 'ai' && (
