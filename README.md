@@ -61,6 +61,22 @@ Dashboard at `http://localhost:3000`.
 
 ### 5. Seed the database (optional)
 
+Two seed scripts are available:
+
+**Real market data (recommended)** — pulls historical ETF prices via yfinance (2005–present, ~21 years):
+
+```bash
+DB_PATH=volumes/appdata/vhf.db poetry run python scripts/seed_real.py
+# Options:
+#   --start-date 2005-01-01   (default)
+#   --end-date   today        (default)
+#   --dry-run                 preview without writing
+```
+
+Each strategy is proxied by a real ETF (MTUM, RSP, EFA, IVE, QUAL, USMV, XLK, TLT, LQD, SVXY). Fallback tickers are used for ETFs that launched after 2005.
+
+**Synthetic data (GBM)** — generates deterministic price paths via Geometric Brownian Motion (no network required):
+
 ```bash
 docker cp scripts/seed.py vhf-api:/app/seed.py
 docker exec vhf-api python /app/seed.py
@@ -200,7 +216,7 @@ poetry run python scripts/evaluate.py \
 
 Output: `results/backtest_results.csv` and `results/backtest_summary.txt`.
 
-> **Note:** Results in `results/` were generated against real QuantRocket Moonshot strategy backtests using historical market data. Re-running against different price data will produce different numbers.
+> **Note:** Results in `volumes/appdata/results/` were generated using real ETF price history seeded via `scripts/seed_real.py` (yfinance, 2005–2026, ~21 years). Re-running against different price data will produce different numbers.
 
 ---
 
@@ -223,6 +239,20 @@ Accepted response shapes from the AI:
 - `[w1, w2, ...]`
 - `{"weights": [...]}`
 - `{"allocations": {"SID1": 0.4, "SID2": 0.6}}`
+
+### Structured Context Delivery
+
+At each rebalance, the AI receives a formatted metrics table computed from the full price history visible at that point — not raw prices. Metrics per strategy:
+
+| Metric | Description |
+|---|---|
+| `return_20d / 63d / 252d` | Recent momentum over 1M, 3M, 1Y windows |
+| `return_cum_pct` | Full-history cumulative return |
+| `vol_63d_ann_pct` | Annualised 63-day volatility |
+| `sharpe_252d` | Annualised 1-year Sharpe ratio |
+| `max_drawdown_pct` | Maximum drawdown over full history |
+
+This structured context (rather than raw price arrays) is the primary mechanism enabling meaningful AI allocation decisions.
 
 ### Live AI Backtesting
 
@@ -279,7 +309,7 @@ X-API-Key: <ADMIN_API_KEY>
 poetry run python -m unittest discover -s tests -p 'test_*.py'
 ```
 
-120+ tests across allocation, rebalance, reconcile, scheduler, selector, backtest, backtest sync, and persistence logic. All DB and network calls are mocked.
+137 tests across allocation, rebalance, reconcile, scheduler, selector, backtest, backtest sync, and persistence logic. All DB and network calls are mocked.
 
 ---
 
