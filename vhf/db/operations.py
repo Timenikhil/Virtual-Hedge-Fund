@@ -216,6 +216,27 @@ def get_db_portfolio_id(pid: int) -> Portfolio:
             live=bool(int(record[4])),
         )
 
+def delete_db_portfolio_id(pid: int) :
+    """
+
+    Delete Portfolio by Id
+
+    :param pid: Portfolio
+    :return:
+    """
+    connection.connect()
+    connection.client.sync()
+    with closing(connection.client.cursor()) as cursor:
+        cursor.execute(
+            """
+            DELETE FROM portfolios
+            WHERE PID  = ?""",
+            (pid,),
+        )
+        connection.client.commit()
+        connection.client.sync()
+        if cursor.rowcount == 0:
+            print(f"No portfolio found with PID: {pid}")
 
 def get_db_strat(sid: str) -> StrategyPrice:
     """

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Path, HTTPException
 from vhf.ai.ai_selectors import selectStrat, selectSelector
 from vhf.ai.selectors import selectorStrat
 from vhf.db.operations import set_db_pool, get_db_portfolio, update_portfolio_weights, update_portfolio_strats, \
-    get_ranked_list, get_sids, get_db_portfolio_id, get_ranked_strat_list, get_db_strat
+    get_ranked_list, get_sids, get_db_portfolio_id, get_ranked_strat_list, get_db_strat, delete_db_portfolio_id
 from vhf.models.error import HTTPError
 from vhf.logging.log import logger
 from vhf.models.portfolio import Portfolio, PortfolioList, \
@@ -29,7 +29,6 @@ async def select_pool(pool: PortfolioCreationRequest) -> int:
     :param pool:
     :return: Portfolio ID
     """
-    print("here")
     return set_db_pool(pool,datetime.datetime.today().isoformat())
 
 @router.post("/ai-select-pool")
@@ -123,6 +122,15 @@ async def get_portfolio(portfolio_id : PortfolioID) -> Portfolio:
     :return:
     """
     return get_db_portfolio_id(portfolio_id.portfolio_id)
+
+@router.delete("/portfolio_id")
+async def delete_portfolio(portfolio_id : PortfolioID) -> None:
+    """
+    Returns a portfolio with given id under current user
+    :param portfolio:
+    :return:
+    """
+    return delete_db_portfolio_id(portfolio_id.portfolio_id)
 
 @router.get("/strategies")
 async def get_strategies(rankBy : str|None = None,limit:int|None = None) -> StrategyList:

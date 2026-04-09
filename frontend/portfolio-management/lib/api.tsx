@@ -176,6 +176,16 @@ export const portfolioAPI = {
 
     },
 
+    deletePortfolio: async(pid: string) : Promise<void>=>{
+        const portfolio_id = parseInt(pid)
+        const response = await fetch(`${API_BASE_URL}/portfolio_id`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({portfolio_id})
+        });
+        if (!response.ok) throw new Error('Failed to delete portfolio');
+    },
+
     selectPool: async (data: PortfolioRequest): Promise<number> => {
         const response = await fetch(`${API_BASE_URL}/select-pool`, {
             method: 'POST',

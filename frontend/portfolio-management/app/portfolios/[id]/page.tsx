@@ -49,6 +49,19 @@ export default function PortfolioDetailPage() {
         }
     };
 
+    const deletePortfolio = async () => {
+        try {
+            if (!confirm('Are you sure you want to delete this portfolio?')) return;
+            await portfolioAPI.deletePortfolio(params.id as string);
+            // Redirect to portfolios page after successful deletion
+            router.push('/portfolios');
+
+        } catch (error) {
+            console.error('Error deleting portfolio:', error);
+            setLoading(false);
+        }
+    };
+
     useEffect(() => {
         fetchPortfolioDetails();
     }, [params.id]);
@@ -92,18 +105,19 @@ export default function PortfolioDetailPage() {
                         onClick={() => router.push('/portfolios')}
                         className="flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-6"
                     >
-                        <ArrowLeft className="w-5 h-5" />
+                        <ArrowLeft className="w-5 h-5"/>
                         Back to Portfolios
                     </button>
 
                     <div className="mb-8">
                         <h1 className="text-3xl font-bold mb-2">{portfolio.name}</h1>
+                        <div className="flex items-center justify-between">
                         <div className="flex items-center gap-4">
                             <div className="flex items-center gap-2">
                                 {portfolio.total_return >= 0 ? (
-                                    <TrendingUp className="w-5 h-5 text-green-600" />
+                                    <TrendingUp className="w-5 h-5 text-green-600"/>
                                 ) : (
-                                    <TrendingDown className="w-5 h-5 text-red-600" />
+                                    <TrendingDown className="w-5 h-5 text-red-600"/>
                                 )}
                                 <span className={`text-2xl font-semibold ${
                                     portfolio.total_return >= 0 ? 'text-green-600' : 'text-red-600'
@@ -113,123 +127,132 @@ export default function PortfolioDetailPage() {
                             </div>
                             <span className="text-gray-600">Total Return</span>
                         </div>
+                            <button
+                                onClick={deletePortfolio}
+                                className="bg-red-600 hover:bg-red-500 text-gray-200 font-semibold py-2 px-4 border border-gray-400 rounded shadow transition-colors"
+                            >
+                                Delete
+                            </button>
+                        </div>
                     </div>
+                        <div className="grid grid-cols-2 gap-6 mb-8">
+                            {/* Pie Chart - Weight Distribution */}
+                            <div className="bg-white rounded-lg border p-6">
+                                <h2 className="text-xl font-semibold mb-4">Strategy Weight Distribution</h2>
+                                <ResponsiveContainer width="100%" height={300}>
+                                    <PieChart>
+                                        <Pie
+                                            data={pieData}
+                                            cx="50%"
+                                            cy="50%"
+                                            labelLine={false}
+                                            label={({name, value}) => `${name}: ${value.toFixed(2)}%`}
+                                            outerRadius={100}
+                                            fill="#8884d8"
+                                            dataKey="value"
+                                        >
+                                            {pieData.map((entry, index) => (
+                                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]}/>
+                                            ))}
+                                        </Pie>
+                                        <Tooltip/>
+                                    </PieChart>
+                                </ResponsiveContainer>
+                            </div>
 
-                    <div className="grid grid-cols-2 gap-6 mb-8">
-                        {/* Pie Chart - Weight Distribution */}
-                        <div className="bg-white rounded-lg border p-6">
-                            <h2 className="text-xl font-semibold mb-4">Strategy Weight Distribution</h2>
-                            <ResponsiveContainer width="100%" height={300}>
-                                <PieChart>
-                                    <Pie
-                                        data={pieData}
-                                        cx="50%"
-                                        cy="50%"
-                                        labelLine={false}
-                                        label={({ name, value }) => `${name}: ${value.toFixed(2)}%`}
-                                        outerRadius={100}
-                                        fill="#8884d8"
-                                        dataKey="value"
-                                    >
-                                        {pieData.map((entry, index) => (
-                                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                        ))}
-                                    </Pie>
-                                    <Tooltip />
-                                </PieChart>
-                            </ResponsiveContainer>
+                            <StrategyWeightEditor
+                                portfolioId={portfolio.id}
+                                strategies={portfolio.strategies}
+                                colors={COLORS}
+                                onWeightsUpdated={() => {
+                                    window.location.reload();
+                                }}
+                            />
                         </div>
 
-                        <StrategyWeightEditor
-                            portfolioId={portfolio.id}
-                            strategies={portfolio.strategies}
-                            colors={COLORS}
-                            onWeightsUpdated={() => {
-                                window.location.reload();
-                            }}
-                        />
-                    </div>
-
-                    {/* Performance Chart */}
-                    <div className="bg-white rounded-lg border p-6">
-                        <h2 className="text-xl font-semibold mb-4">Performance Over Time</h2>
-                        <p className="text-sm text-gray-600 mb-4">
-                            Portfolio vs Top 3 Strategies by Weight
-                        </p>
-                        <ResponsiveContainer width="100%" height={400}>
-                            <AreaChart data={portfolio.performance}>
-                                <defs>
-                                    <linearGradient id="colorPortfolio" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.8}/>
-                                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
-                                    </linearGradient>
-                                    <linearGradient id="colorStrategy1" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.6}/>
-                                        <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
-                                    </linearGradient>
-                                    <linearGradient id="colorStrategy2" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.6}/>
-                                        <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
-                                    </linearGradient>
-                                    <linearGradient id="colorStrategy3" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor="#ef4444" stopOpacity={0.6}/>
-                                        <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
-                                    </linearGradient>
-                                </defs>
-                                <CartesianGrid strokeDasharray="3 3" />
-                                <XAxis
-                                    dataKey="date"
-                                    tickFormatter={(date) => new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                                />
-                                <YAxis
-                                    label={{ value: 'Value (1K $)', angle: -90, position: 'insideLeft' }}
-                                />
-                                <Tooltip
-                                    formatter={(value: number) => `${value.toFixed(0)} k$`}
-                                    labelFormatter={(date) => new Date(date).toLocaleDateString()}
-                                />
-                                <Legend />
-                                <Area
-                                    type="monotone"
-                                    dataKey="portfolio"
-                                    name="Portfolio"
-                                    stroke="#3b82f6"
-                                    strokeWidth={3}
-                                    fillOpacity={1}
-                                    fill="url(#colorPortfolio)"
-                                />
-                                <Area
-                                    type="monotone"
-                                    dataKey="strategy1"
-                                    name={top3Strategies[0]?.name}
-                                    stroke="#10b981"
-                                    strokeWidth={2}
-                                    fillOpacity={1}
-                                    fill="url(#colorStrategy1)"
-                                />
-                                <Area
-                                    type="monotone"
-                                    dataKey="strategy2"
-                                    name={top3Strategies[1]?.name}
-                                    stroke="#f59e0b"
-                                    strokeWidth={2}
-                                    fillOpacity={1}
-                                    fill="url(#colorStrategy2)"
-                                />
-                                <Area
-                                    type="monotone"
-                                    dataKey="strategy3"
-                                    name={top3Strategies[2]?.name}
-                                    stroke="#ef4444"
-                                    strokeWidth={2}
-                                    fillOpacity={1}
-                                    fill="url(#colorStrategy3)"
-                                />
-                            </AreaChart>
-                        </ResponsiveContainer>
+                        {/* Performance Chart */}
+                        <div className="bg-white rounded-lg border p-6">
+                            <h2 className="text-xl font-semibold mb-4">Performance Over Time</h2>
+                            <p className="text-sm text-gray-600 mb-4">
+                                Portfolio vs Top 3 Strategies by Weight
+                            </p>
+                            <ResponsiveContainer width="100%" height={400}>
+                                <AreaChart data={portfolio.performance}>
+                                    <defs>
+                                        <linearGradient id="colorPortfolio" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.8}/>
+                                            <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                                        </linearGradient>
+                                        <linearGradient id="colorStrategy1" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="#10b981" stopOpacity={0.6}/>
+                                            <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                                        </linearGradient>
+                                        <linearGradient id="colorStrategy2" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.6}/>
+                                            <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
+                                        </linearGradient>
+                                        <linearGradient id="colorStrategy3" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="#ef4444" stopOpacity={0.6}/>
+                                            <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
+                                        </linearGradient>
+                                    </defs>
+                                    <CartesianGrid strokeDasharray="3 3"/>
+                                    <XAxis
+                                        dataKey="date"
+                                        tickFormatter={(date) => new Date(date).toLocaleDateString('en-US', {
+                                            month: 'short',
+                                            day: 'numeric'
+                                        })}
+                                    />
+                                    <YAxis
+                                        label={{value: 'Value (1K $)', angle: -90, position: 'insideLeft'}}
+                                    />
+                                    <Tooltip
+                                        formatter={(value: number) => `${value.toFixed(0)} k$`}
+                                        labelFormatter={(date) => new Date(date).toLocaleDateString()}
+                                    />
+                                    <Legend/>
+                                    <Area
+                                        type="monotone"
+                                        dataKey="portfolio"
+                                        name="Portfolio"
+                                        stroke="#3b82f6"
+                                        strokeWidth={3}
+                                        fillOpacity={1}
+                                        fill="url(#colorPortfolio)"
+                                    />
+                                    <Area
+                                        type="monotone"
+                                        dataKey="strategy1"
+                                        name={top3Strategies[0]?.name}
+                                        stroke="#10b981"
+                                        strokeWidth={2}
+                                        fillOpacity={1}
+                                        fill="url(#colorStrategy1)"
+                                    />
+                                    <Area
+                                        type="monotone"
+                                        dataKey="strategy2"
+                                        name={top3Strategies[1]?.name}
+                                        stroke="#f59e0b"
+                                        strokeWidth={2}
+                                        fillOpacity={1}
+                                        fill="url(#colorStrategy2)"
+                                    />
+                                    <Area
+                                        type="monotone"
+                                        dataKey="strategy3"
+                                        name={top3Strategies[2]?.name}
+                                        stroke="#ef4444"
+                                        strokeWidth={2}
+                                        fillOpacity={1}
+                                        fill="url(#colorStrategy3)"
+                                    />
+                                </AreaChart>
+                            </ResponsiveContainer>
+                        </div>
                     </div>
                 </div>
-            </div>
         </ProtectedRoute>
-    );
+);
 }
