@@ -11,6 +11,8 @@ from vhf.models.allocation import AllocationMethod
 from vhf.services.backtest import (
     BacktestError,
     BacktestRequest,
+    _compute_correlation_matrix,
+    _compute_strategy_metrics,
     _compute_weights,
     _equal_weights,
     _max_drawdown,
@@ -549,6 +551,61 @@ class AIWeightedBacktestTest(unittest.TestCase):
         ))
 
         self.assertEqual(result.rebalance_history[0].date, result.start_date)
+
+
+class CorrelationMatrixTest(unittest.TestCase):
+    """Tests for _compute_correlation_matrix."""
+
+    def _price_series(self, n: int, drift: float = 0.001) -> list[float]:
+        """Simple trending price series of length n."""
+        prices = [100.0]
+        for i in range(1, n):
+            prices.append(prices[-1] * (1 + drift))
+        return prices
+
+    def test_self_correlation_is_one(self):
+        prices = self._price_series(300)
+        matrix = _compute_correlation_matrix(["a"], {"a": prices})
+        self.assertIsNotNone(matrix)
+        self.assertAlmostEqual(matrix[0][0], 1.0, places=5)
+
+    def test_identical_series_correlation_is_one(self):
+        prices = self._price_series(300)
+        matrix = _compute_correlation_matrix(["a", "b"], {"a": prices, "b": prices})
+        self.assertIsNotNone(matrix)
+        self.assertAlmostEqual(matrix[0][1], 1.0, places=3)
+        self.assertAlmostEqual(matrix[1][0], 1.0, places=3)
+
+    def test_opposite_series_correlation_is_negative(self):
+        up = self._price_series(300, drift=+0.002)
+        down = self._price_series(300, drift=-0.002)
+        matrix = _compute_correlation_matrix(["up", "down"], {"up": up, "down": down})
+        self.assertIsNotNone(matrix)
+        self.assertLess(matrix[0][1], 0)
+
+    def test_returns_none_when_insufficient_data(self):
+        short = self._price_series(10)
+        result = _compute_correlation_matrix(["a", "b"], {"a": short, "b": short})
+        self.assertIsNone(result)
+
+    def test_matrix_is_symmetric(self):
+        p1 = self._price_series(300, drift=0.001)
+        p2 = self._price_series(300, drift=0.003)
+        matrix = _compute_correlation_matrix(["a", "b"], {"a": p1, "b": p2})
+        self.assertIsNotNone(matrix)
+        self.assertAlmostEqual(matrix[0][1], matrix[1][0], places=10)
+
+    def test_sharpe_504d_present_in_metrics(self):
+        prices = self._price_series(600, drift=0.001)
+        m = _compute_strategy_metrics(prices)
+        self.assertIn("sharpe_504d", m)
+        self.assertIsNotNone(m["sharpe_504d"])
+
+    def test_sharpe_504d_none_when_single_price(self):
+        # With only 1 price, _daily_returns produces an empty list → None.
+        m = _compute_strategy_metrics([100.0])
+        self.assertIn("sharpe_504d", m)
+        self.assertIsNone(m["sharpe_504d"])
 
 
 if __name__ == "__main__":

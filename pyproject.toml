@@ -16,11 +16,13 @@ opentelemetry-instrumentation-fastapi = "^0.59b0"
 opentelemetry-exporter-otlp = "^1.38.0"
 anthropic = "^0.86.0"
 yfinance = "^1.2.0"
+matplotlib = "^3.10.8"
 
 
 
 [tool.poetry.group.dev.dependencies]
 poethepoet = "^0.27.0"
+pytest = "^9.0.2"
 
 [tool.poe.tasks]
 # QuantRocket containers — start once, rarely need restarting

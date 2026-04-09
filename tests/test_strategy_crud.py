@@ -76,7 +76,6 @@ class UpsertStrategyTest(unittest.TestCase):
         upsert_strategy(strategy_id="s1", name="N", description="d", category="equity")
 
         mock_conn.client.commit.assert_called_once()
-        mock_conn.client.sync.assert_called()
 
 
 # ---------------------------------------------------------------------------

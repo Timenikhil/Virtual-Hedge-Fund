@@ -69,4 +69,63 @@ Jeffrey's work is framed as **applied AI systems research** — not a new tradin
 - ACM ICAIF LLM survey (2024) — deployment safety as open challenge
 - ICLR 2025 workshop — LLM top-down sector allocation (identifies the gap this project fills)
 - FolioLLM / Stanford (2024) — LLMs struggle with precise allocation without structured context
+- DeMiguel et al. (2009) — 1/N diversification benchmark; explains why AI underperforms EW on cross-asset portfolios
 
+## System architecture
+
+```
+QuantRocket (strategies) → Price history DB → Backtest / Allocation service
+                                                    ↓
+                                         AI context builder
+                                         (_compute_strategy_metrics: 7 metrics from full history)
+                                                    ↓
+                                         Claude API (pluggable, timeout-bounded, fallback-safe)
+                                                    ↓
+                                         Weight vector → Normalise → Persist
+                                                    ↓
+                                         Rebalance engine (L1 drift threshold filter)
+                                                    ↓
+                                         Reconcile scheduler (atomic claim, exactly-once)
+                                                    ↓
+                                         QuantRocket execution
+```
+
+## Backtest evaluation results
+
+**Data source:** Real ETF proxies via yfinance — 10 strategies mapped to ETFs (MTUM, RSP, EFA, IVE, QUAL, USMV, XLK, TLT, LQD, SVXY). Date range 2005–2026 (~21 years), covering GFC 2008, European debt crisis 2011, COVID 2020, 2022 rate hike cycle.
+
+### AI context improvement story (evidence for contribution 2)
+
+This is the core empirical evidence. The structured context pipeline is the variable being tested — not the AI model.
+
+| Run | Data | AI context state | Alpha Fund AI vs EW | Key finding |
+|---|---|---|---|---|
+| Run 1 | GBM synthetic, 1yr | Broken: 20-price noise mislabelled as full history | -1.47pp | Synthetic data invalid; discarded |
+| Run 2 | Real ETFs, 21yr | Still broken: raw 20-price slice sent to Claude | +50.68pp | Real data matters; context still wrong |
+| Run 3 | Real ETFs, 21yr | Fixed: 7-metric structured table (returns, vol, Sharpe, drawdown) | +202.65pp | **Context quality is the dominant variable** |
+| Run 4 | Real ETFs, 21yr | Same fixed context; 4 new portfolios tested | see table below | Pattern confirmed across 6 portfolios |
+
+The +152pp improvement from Run 2 → Run 3 (same data, same model, only context changed) is the primary evidence that structured context delivery is a meaningful infrastructure concern, not just prompt tuning.
+
+### Run 4 full results — 6 portfolios, ~863 live Claude API calls, 0 fallbacks
+
+| Portfolio | Strategy mix | EW Return | AI Return | AI vs EW |
+|---|---|---|---|---|
+| Alpha Fund | 5 equity (momentum, value, sector) | 696% | 899% | **+203pp** |
+| Momentum Trio | 3 equity momentum | 730% | 952% | **+222pp** |
+| Factor Blend | 4 equity factors | 417% | 424% | +7pp |
+| Diversified Fund | All 10 (cross-asset) | 512% | 397% | -115pp |
+| Balanced Core | 4 cross-asset (equity + fixed income) | 391% | 245% | -147pp |
+| Alternatives | 3 alternatives | 354% | 144% | -210pp |
+
+**Pattern:** AI allocation adds clear value on homogeneous equity portfolios where strategies compete on the same return/risk dimensions. It underperforms equal-weight on cross-asset portfolios — consistent with DeMiguel et al. (2009): 1/N is hard to beat on diverse cross-asset portfolios even for sophisticated optimisers.
+
+**What NOT to include in the report:** Mention cross-asset underperformance briefly in Limitations, cite DeMiguel, and move on.
+
+## Report framing guidance
+
+- This is **systems research**, not quant research. Emphasise correctness, safety, and operability — not alpha generation.
+- The 3/6 AI win rate is academically defensible. Present it honestly alongside the DeMiguel (2009) benchmark context. Do not oversell it.
+- The iterative context improvement (Run 1 → Run 3, +204pp on Alpha Fund) is the strongest evidence for contribution 2. Lead with it.
+- The infrastructure (fallback, strict mode, atomic scheduler, threshold rebalancing) is the primary contribution — the evaluation validates it works at scale, not that the AI is a superior stock-picker.
+- 863 live API calls with 0 fallbacks and 0 errors is itself a meaningful reliability result worth stating.

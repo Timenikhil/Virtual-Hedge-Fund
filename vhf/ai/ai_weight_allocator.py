@@ -26,15 +26,23 @@ MAX_TOKENS = 512
 
 _SYSTEM_PROMPT = """\
 You are a quantitative portfolio manager. Allocate capital across algorithmic \
-trading strategies by analysing their risk-adjusted performance metrics.
+trading strategies by analysing their risk-adjusted performance metrics and \
+cross-strategy correlations.
 
-Favour strategies with:
-- Higher Sharpe ratio (risk-adjusted return)
-- Stronger recent momentum (1-month, 3-month, 1-year returns)
-- Lower drawdown for their return level
+WITHIN a single asset category (e.g. all equity strategies):
+- Favour higher Sharpe ratio (prefer 2-year Sharpe over 1-year when both are provided)
+- Favour stronger recent momentum (3-month, 1-year returns)
+- Reduce weight in strategies with deep drawdowns relative to category peers
 
-Reduce weight in strategies with poor risk-adjusted returns or deep drawdowns \
-relative to peers. Diversify across asset categories when possible.
+ACROSS asset categories (equity, fixed_income, alternatives):
+- Treat low or negative correlation as a source of portfolio value, not a penalty.
+  A bond or alternatives strategy with r < 0 vs equity provides drawdown protection \
+even when its standalone return is lower.
+- Do not eliminate an asset category solely because of recent underperformance — \
+  this destroys diversification and increases portfolio tail risk.
+- Maintain meaningful allocations (>10%) to each asset category present in the portfolio \
+  unless a category has both negative Sharpe AND high positive correlation to all others.
+- Weight reduction should be gradual: avoid concentrating >60% in a single category.
 
 Rules:
 - Return ONLY a JSON array of weights, one per strategy, in the same order as the input.
@@ -55,12 +63,13 @@ def _build_prompt(context: dict[str, Any]) -> str:
     strategies: list[str] = context.get("strategies", [])
     strategy_data: list[dict] = context.get("strategy_data", [])
     current_weights: list[float] | None = context.get("current_weights")
+    correlation_matrix: list[list[float]] | None = context.get("correlation_matrix")
     request_context: dict | None = context.get("request_context")
 
     lines: list[str] = [
         f"Allocate across {len(strategies)} strategies. Performance metrics (daily prices, annualised where noted):\n",
-        f"{'Strategy':<26} {'Category':<14} {'1M Ret':>8} {'3M Ret':>8} {'1Y Ret':>8} {'Cum Ret':>9} {'Vol63d':>7} {'Sharpe1Y':>9} {'MaxDD':>8}",
-        "-" * 105,
+        f"{'Strategy':<26} {'Category':<14} {'1M Ret':>8} {'3M Ret':>8} {'1Y Ret':>8} {'Cum Ret':>9} {'Vol63d':>7} {'Sh1Y':>6} {'Sh2Y':>6} {'MaxDD':>8}",
+        "-" * 112,
     ]
 
     for sd in strategy_data:
@@ -73,9 +82,30 @@ def _build_prompt(context: dict[str, Any]) -> str:
             f"{_fmt(m.get('return_252d_pct'), plus=True):>8} "
             f"{_fmt(m.get('return_cum_pct'),  plus=True):>9} "
             f"{_fmt(m.get('vol_63d_ann_pct')):>7} "
-            f"{_fmt(m.get('sharpe_252d'), suffix='', plus=True):>9} "
+            f"{_fmt(m.get('sharpe_252d'), suffix='', plus=True):>6} "
+            f"{_fmt(m.get('sharpe_504d'), suffix='', plus=True):>6} "
             f"{_fmt(m.get('max_drawdown_pct')):>8}"
         )
+
+    # Render correlation matrix as a lower-triangle table when available.
+    # This gives the AI the cross-strategy diversification signal it needs for
+    # cross-asset portfolios (bonds/alternatives have r < 0 vs equity).
+    if correlation_matrix and len(correlation_matrix) == len(strategies):
+        col_w = 7
+        # Shorten labels to fit in column width
+        short = [s[:col_w - 1] for s in strategies]
+        lines.append(
+            f"\nPairwise correlations (252-day daily returns) — "
+            f"negative r = diversification hedge, positive r > 0.8 = high overlap:"
+        )
+        header = f"{'':26}" + "".join(f"{h:>{col_w}}" for h in short)
+        lines.append(header)
+        for i, sid in enumerate(strategies):
+            row_vals = "".join(
+                f"{correlation_matrix[i][j]:>{col_w}.2f}" if j <= i else " " * col_w
+                for j in range(len(strategies))
+            )
+            lines.append(f"{sid:<26}{row_vals}")
 
     if current_weights and len(current_weights) == len(strategies):
         cw_str = ", ".join(f"{w:.3f}" for w in current_weights)

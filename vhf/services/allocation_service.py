@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from datetime import datetime, timezone
 
-from vhf.services.backtest import _compute_strategy_metrics  # shared metrics helper
+from vhf.services.backtest import _compute_strategy_metrics, _compute_correlation_matrix
 from typing import Any
 
 from vhf.ai.weight_allocator_provider import (
@@ -118,13 +118,31 @@ def _build_ai_context(portfolio: Portfolio, request: AllocationRequest) -> dict[
         except AllocationServiceError:
             current_weights = None
 
+    # Build per-strategy context, retaining price series for correlation computation.
+    strategy_data = []
+    prices_dict: dict[str, list[float]] = {}
+    for sid in strategy_ids:
+        sd = _build_strategy_context(sid)
+        strategy_data.append(sd)
+        # Reload prices for correlation (not stored on sd to keep context clean).
+        try:
+            strat = get_db_strat(sid)
+            prices = [float(v) for v in strat.prices if v is not None and math.isfinite(float(v))]
+            prices_dict[sid] = prices
+        except Exception:
+            prices_dict[sid] = []
+
     context: dict[str, Any] = {
         "portfolio_id": request.portfolio_id,
         "strategies": strategy_ids,
         "current_weights": current_weights,
-        "strategy_data": [_build_strategy_context(strategy_id) for strategy_id in strategy_ids],
+        "strategy_data": strategy_data,
         "generated_at": _utc_now_iso(),
     }
+
+    corr = _compute_correlation_matrix(strategy_ids, prices_dict)
+    if corr is not None:
+        context["correlation_matrix"] = corr
 
     if request.ai_context is not None:
         # Keep partner integration flexible: caller can pass arbitrary feature payload.

@@ -231,9 +231,53 @@ def _compute_strategy_metrics(prices: list[float]) -> dict[str, Any]:
         "return_cum_pct":   cumulative,
         "vol_63d_ann_pct":  _annualised_vol(63),
         "sharpe_252d":      _sharpe(252),
+        "sharpe_504d":      _sharpe(504),
         "max_drawdown_pct": _max_drawdown(),
         "n_periods":        n,
     }
+
+
+def _compute_correlation_matrix(
+    strategy_ids: list[str],
+    prices_dict: dict[str, list[float]],
+    lookback: int = 252,
+) -> list[list[float]] | None:
+    """
+    Compute pairwise Pearson correlations of daily returns over the last `lookback` days.
+
+    Returns an n×n matrix in strategy_ids order, or None if fewer than 20 aligned
+    data points are available (too little data to be meaningful).
+    """
+    def _returns(prices: list[float]) -> list[float]:
+        window = prices[-(lookback + 1):] if len(prices) > lookback else prices
+        return [
+            (window[i] - window[i - 1]) / window[i - 1]
+            for i in range(1, len(window))
+            if window[i - 1] != 0
+        ]
+
+    ret_series = {sid: _returns(prices_dict.get(sid, [])) for sid in strategy_ids}
+    min_len = min((len(r) for r in ret_series.values()), default=0)
+    if min_len < 20:
+        return None
+
+    aligned = {sid: ret_series[sid][-min_len:] for sid in strategy_ids}
+
+    def _pearson(x: list[float], y: list[float]) -> float:
+        n = len(x)
+        mx, my = sum(x) / n, sum(y) / n
+        num = sum((xi - mx) * (yi - my) for xi, yi in zip(x, y))
+        sx = math.sqrt(sum((xi - mx) ** 2 for xi in x))
+        sy = math.sqrt(sum((yi - my) ** 2 for yi in y))
+        if sx == 0 or sy == 0:
+            return 0.0
+        return round(num / (sx * sy), 3)
+
+    return [
+        [1.0 if sid1 == sid2 else _pearson(aligned[sid1], aligned[sid2])
+         for sid2 in strategy_ids]
+        for sid1 in strategy_ids
+    ]
 
 
 def _build_backtest_ai_context(
@@ -261,6 +305,11 @@ def _build_backtest_ai_context(
         "strategy_data": strategy_data,
         "current_weights": current_weights,
     }
+
+    corr = _compute_correlation_matrix(strategy_ids, prices_up_to)
+    if corr is not None:
+        ctx["correlation_matrix"] = corr
+
     if extra_context:
         ctx["request_context"] = extra_context
     return ctx
