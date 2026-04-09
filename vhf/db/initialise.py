@@ -1,4 +1,5 @@
 from contextlib import closing
+from pathlib import Path
 
 from vhf.db import connection
 
@@ -6,37 +7,11 @@ from vhf.db import connection
 def initialiseDB():
     connection.connect()
     connection.client.sync()
+
+    schema_path = Path(__file__).parent / "schema.sql"
+    schema_sql = schema_path.read_text()
+
     with closing(connection.client.cursor()) as cursor:
-        cursor.execute(
-            """
-                        CREATE TABLE IF NOT EXISTS portfolios (PID INTEGER PRIMARY KEY AUTOINCREMENT,
-                        PNAME TEXT NOT NULL,
-                        WEIGHTS TEXT,
-                        SIDS TEXT NOT NULL,
-                        DATE TEXT NOT NULL,
-                        LIVE INTEGER NOT NULL);"""
-        )
-        cursor.execute(
-            """
-                        CREATE TABLE IF NOT EXISTS strategies (SID TEXT PRIMARY KEY,
-                        NAME TEXT NOT NULL,
-                        DESCRIPTION TEXT NOT NULL,
-                        CATEGORY TEXT NOT NULL,
-                        P0 INTEGER NOT NULL,
-                        P1 INTEGER NOT NULL,
-                        P2 INTEGER NOT NULL,
-                        P3 INTEGER NOT NULL,
-                        P4 INTEGER NOT NULL,
-                        P5 INTEGER NOT NULL);
-                        """
-        )
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS portfolio_accounts (PID INTEGER PRIMARY KEY,
-                ACCOUNT TEXT NOT NULL,
-                UNIQUE(ACCOUNT)
-            );
-            """
-        )
+        cursor.executescript(schema_sql)
         connection.client.commit()
         connection.client.sync()
