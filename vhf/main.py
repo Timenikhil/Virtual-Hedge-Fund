@@ -63,5 +63,5 @@ async def add_security_headers(request: Request, call_next):
 
     return response
 
-# uncomment this after setting appropriate environment variables
-# setup_observability(app)
+# remember to set appropriate environment variables
+setup_observability(app)
