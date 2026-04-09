@@ -1,2 +1,37 @@
 DU7629714:
-  umd-demo: 95
+  strat-1: 0.35
+  strat-2: 0.25
+  strat-3: 0.2
+  strat-4: 0.124
+  strat-5: 0.076
+DU88888:
+  strat-1: 1.0
+U1000001:
+  mom_us_large: 0.2
+  quality_factor: 0.2
+  sector_rotation: 0.2
+  trend_intl: 0.2
+  val_factor_us: 0.2
+U1000002:
+  credit_ls: 0.1
+  low_vol_factor: 0.1
+  mean_rev_us: 0.1
+  mom_us_large: 0.1
+  quality_factor: 0.1
+  rates_macro: 0.1
+  sector_rotation: 0.1
+  trend_intl: 0.1
+  val_factor_us: 0.1
+  vol_arb: 0.1
+paper-aggressive:
+  strat-1: 0.3207717269201206
+  strat-6: 0.3667935352108585
+  strat-7: 0.31243473786902093
+paper-defensive:
+  strat-2: 0.31105005018613235
+  strat-3: 0.3058940905727406
+  strat-8: 0.3830558592411271
+paper-neutral:
+  strat-2: 0.3064804974653308
+  strat-4: 0.3629695291704809
+  strat-5: 0.33054997336418834

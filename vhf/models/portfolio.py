@@ -23,6 +23,7 @@ class PortfolioSelector(str,Enum):
 
 class PortfolioCreationRequest(BaseModel):
     portfolio_name: str
+    account: str
     strategies: List[str] # ids of strategies
 
 class PortfolioRequest(PortfolioID):
@@ -32,5 +33,5 @@ class PortfolioWeights(PortfolioID):
     weights : List[float]
 
 class PortfolioSelectorRequest(PortfolioID) :
-    selector : PortfolioSelector | None = None,
+    selector : PortfolioSelector | None = None
     k:int = 10

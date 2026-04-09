@@ -1,46 +1,52 @@
-import os
+import sqlite3
+import threading
 from contextlib import closing
 
-import libsql
 from dotenv import load_dotenv
+import os
 
 from vhf.logging.log import logger
 
+load_dotenv()
 
 client = None
+_connect_lock = threading.Lock()
+
+# Serialises all DB write access across threads (RLock allows nested acquisition
+# by the same thread, e.g. create_reconcile_job → get_reconcile_job).
+db_lock = threading.RLock()
+
+# Local SQLite file path. Stored in the persistent data volume so it survives
+# container restarts.
+_DB_PATH = os.getenv("DB_PATH", "/app/data/vhf.db")
+
 
 def connect():
-
     """
-    Creates and returns a libSQL client connection.
+    Initialises the global sqlite3 connection (idempotent, thread-safe).
 
-    Reads connection URL and auth token from environment variables:
-    - DB_URL: The connection URL for Turso database (e.g., "libsql://...")
-    - DB_TOKEN: The authentication token for Turso database.
-
-    Raises:
-        ValueError: If the required environment variables are not set.
+    Uses a local SQLite file at DB_PATH (default: /app/data/vhf.db) which is
+    on a persistent volume.
     """
-
     global client
+    # Fast path – already connected.
     if client is not None:
         return
-    load_dotenv()
 
-    url = os.getenv("DB_URL")
-    auth_token = os.getenv("DB_TOKEN")
+    with _connect_lock:
+        # Double-checked locking: another thread may have connected while we waited.
+        if client is not None:
+            return
 
-    if not url:
-        raise ValueError("DB_URL environment variable is not set.")
+        # Ensure the data directory exists.
+        os.makedirs(os.path.dirname(_DB_PATH), exist_ok=True)
 
-    if not auth_token:
-        logger.warn("Warning: DB_TOKEN environment variable is not set. Connecting without auth.")
+        client = sqlite3.connect(_DB_PATH, check_same_thread=False)
+        logger.info("SQLite connection opened at %s", _DB_PATH)
 
-    # Create the client instance.
-    client = libsql.connect(
-        "vhf.db",
-        sync_url=url,
-        auth_token=auth_token
-    )
-    client.sync()
 
+def verify_connectivity() -> None:
+    """Run a lightweight query to confirm the DB is reachable. Raises on failure."""
+    connect()
+    with closing(client.cursor()) as cursor:
+        cursor.execute("SELECT 1")

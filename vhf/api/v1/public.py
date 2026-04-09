@@ -1,136 +1,183 @@
 import datetime
 from typing import List
 
-from fastapi import APIRouter, Path, HTTPException
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
-from vhf.ai.ai_selectors import selectStrat, selectSelector
+from vhf.ai.ai_selectors import selectSelector, selectStrat
 from vhf.ai.selectors import selectorStrat
-from vhf.db.operations import set_db_pool, get_db_portfolio, update_portfolio_weights, update_portfolio_strats, \
-    get_ranked_list, get_sids, get_db_portfolio_id, get_ranked_strat_list, get_db_strat
-from vhf.models.error import HTTPError
-from vhf.logging.log import logger
-from vhf.models.portfolio import Portfolio, PortfolioList, \
-    PortfolioSelectorRequest, PortfolioWeights, PortfolioCreationRequest, PortfolioRequest, PortfolioID
-from vhf.models.strategy import StrategyID, StrategyPrice, StrategyList
+from vhf.db.operations import (
+    get_db_portfolio,
+    get_db_portfolio_id,
+    get_db_strat,
+    get_portfolios_summary,
+    get_ranked_list,
+    get_ranked_strat_list,
+    get_sids,
+    set_db_pool,
+    update_portfolio_strats,
+    update_portfolio_weights,
+)
+from vhf.models.allocation import AllocationRequest, AllocationResult
+from vhf.models.portfolio import (
+    Portfolio,
+    PortfolioCreationRequest,
+    PortfolioID,
+    PortfolioList,
+    PortfolioRequest,
+    PortfolioSelectorRequest,
+    PortfolioWeights,
+)
+from vhf.models.rebalance import RebalancePlan, RebalanceRequest
+from vhf.models.strategy import StrategyID, StrategyList, StrategyPrice
+from vhf.services.allocation_service import AllocationServiceError, allocate_portfolio
+from vhf.services.rebalance_engine import RebalanceEngineError, build_rebalance_plan
+
 
 router = APIRouter()
 
+
+class AiPortfolioCreationRequest(BaseModel):
+    portfolio_name: str
+    account: str
+    prompt: str | None = None
+
+
 @router.post("/select-pool")
-async def select_pool(pool : PortfolioCreationRequest) -> int:
+async def select_pool(pool: PortfolioCreationRequest) -> int:
     """
-    Selects Strategy pool from all strategies
-    :param pool:
-    :return: Portfolio ID
+    Select strategy pool from all strategies.
     """
-    print("here")
-    return set_db_pool(pool,datetime.datetime.today().isoformat())
+    return set_db_pool(pool, datetime.datetime.today().isoformat())
+
 
 @router.post("/ai-select-pool")
-async def select_pool(poolName : str, prompt : str | None = None) -> int:
+async def ai_select_pool(req: AiPortfolioCreationRequest) -> int:
     """
-    Selects Strategy pool from all strategies
-    :param poolName:
-    :return: Portfolio ID
+    Select strategy pool from all available strategies via Claude AI.
+    Claude reads the prompt and chooses which strategies to include.
+    Falls back to all strategies if the prompt is empty or Claude is unavailable.
     """
-    pool = PortfolioCreationRequest(portfolio_name=poolName, strategies = selectStrat(prompt))
-    return set_db_pool(pool,datetime.datetime.today().isoformat())
+    all_strategies = get_ranked_strat_list(None, None)
+    available_ids = [s.strategy_id for s in all_strategies.strategies]
+    selected = selectStrat(req.prompt, available_ids)
+    pool = PortfolioCreationRequest(
+        portfolio_name=req.portfolio_name,
+        account=req.account,
+        strategies=selected,
+    )
+    return set_db_pool(pool, datetime.datetime.today().isoformat())
+
 
 @router.post("/ai-select-portfolio")
-async def select_portfolio(pid: PortfolioID) -> List[str]:
+async def ai_select_portfolio(pid: PortfolioID) -> List[str]:
     """
-    Update portfolio using selector
-    :param portfolioID:
-    Ai selects the selector
-    :return:
+    Update portfolio strategies using AI-selected selector logic.
     """
-
-    selector,k = selectSelector(pid.portfolio_id)
-    strategies = selectorStrat(get_sids(pid.portfolio_id),selector,k)
-    update_portfolio_strats(portfolioID=pid.portfolio_id,strats=strategies)
+    selector, k = selectSelector(pid.portfolio_id)
+    strategies = selectorStrat(get_sids(pid.portfolio_id), selector, k)
+    update_portfolio_strats(portfolioID=pid.portfolio_id, strats=strategies)
     return strategies
+
 
 @router.post("/select-portfolio")
-async def select_portfolio(portfolioReq : PortfolioSelectorRequest) -> List[str]:
+async def select_portfolio(portfolioReq: PortfolioSelectorRequest) -> List[str]:
     """
-    Update portfolio using selector
-    :param portfolioID:
-    :param selector:
-    :return:
+    Update portfolio strategies using explicit selector and k.
     """
-    strategies = selectorStrat(get_sids(portfolioReq.portfolio_id),portfolioReq.selector,portfolioReq.k)
-    update_portfolio_strats(portfolioID=portfolioReq.portfolio_id,strats=strategies)
+    strategies = selectorStrat(get_sids(portfolioReq.portfolio_id), portfolioReq.selector, portfolioReq.k)
+    update_portfolio_strats(portfolioID=portfolioReq.portfolio_id, strats=strategies)
     return strategies
 
+
 @router.post("/choose-portfolio")
-async def choose_portfolio(portfolio : PortfolioRequest) -> None:
+async def choose_portfolio(portfolio: PortfolioRequest) -> None:
     """
-    Manually select portfolio from portfolio Pool.
-    Updates given portfolio.
-    :param strategies: strategies from given pool
-    :param portfolioID: portfolio ID
-    :return:
+    Manually set strategies for a portfolio.
     """
-    update_portfolio_strats(portfolioID=portfolio.portfolio_id,strats=portfolio.strategies)
+    update_portfolio_strats(portfolioID=portfolio.portfolio_id, strats=portfolio.strategies)
+
 
 @router.post("/seed-portfolio")
-async def seed_portfolio(portfolioWeights : PortfolioWeights) -> None:
+async def seed_portfolio(portfolioWeights: PortfolioWeights) -> None:
     """
-    seed portfolio with weights.
-    If this function is not called AI autoseeds portfolio.
-    :param portfolioID:
-    :param weights:
-    :return:
+    Seed portfolio with normalized weights.
     """
     total = sum(portfolioWeights.weights)
-    weights = [x/total for x in portfolioWeights.weights]
+    if total <= 0:
+        raise HTTPException(status_code=400, detail="weights must sum to a positive number")
+    weights = [x / total for x in portfolioWeights.weights]
     update_portfolio_weights(portfolioWeights.portfolio_id, weights)
 
+
+@router.post("/allocate-portfolio", response_model=AllocationResult)
+async def allocate_portfolio_endpoint(request: AllocationRequest) -> AllocationResult:
+    """
+    Compute target weights for a portfolio using the selected allocation method.
+    """
+    try:
+        return allocate_portfolio(request)
+    except AllocationServiceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/rebalance-plan", response_model=RebalancePlan)
+async def rebalance_plan_endpoint(request: RebalanceRequest) -> RebalancePlan:
+    """
+    Build a rebalance plan from current to target weights.
+    If `apply=true`, target weights are written and synced via existing DB flow.
+    """
+    try:
+        return build_rebalance_plan(request)
+    except AllocationServiceError as exc:
+        raise HTTPException(status_code=400, detail=f"allocation failed: {exc}")
+    except RebalanceEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 @router.get("/portfolios")
-async def get_portfolios(rankBy : str|None = None,limit:int|None = None) -> PortfolioList:
+async def get_portfolios(rankBy: str | None = None, limit: int | None = None) -> PortfolioList:
     """
-    Returns a list of portfolios ranked by rankBy.
-    :param limit: max number of portfolios to return
-    :param rankBy:
-    :return:
+    Return a list of portfolios ranked by rankBy.
     """
-    return get_ranked_list(rankBy,limit)
+    return get_ranked_list(rankBy, limit)
+
+
+@router.get("/portfolios/summary")
+async def get_portfolios_summary_endpoint() -> list[dict]:
+    """
+    Return all portfolios with return_percentage computed server-side in a single SQL query.
+    """
+    return get_portfolios_summary()
+
 
 @router.get("/portfolio")
-async def get_portfolio(portfolioName : str) -> Portfolio:
+async def get_portfolio(portfolioName: str) -> Portfolio:
     """
-    Returns a portfolio with given name under current user
-    :param portfolioName:
-    :return:
+    Return a portfolio with the given name.
     """
     return get_db_portfolio(portfolioName)
 
+
 @router.post("/portfolio_id")
-async def get_portfolio(portfolio_id : PortfolioID) -> Portfolio:
+async def get_portfolio_by_id(portfolio_id: PortfolioID) -> Portfolio:
     """
-    Returns a portfolio with given id under current user
-    :param portfolio:
-    :return:
+    Return a portfolio with the given id.
     """
     return get_db_portfolio_id(portfolio_id.portfolio_id)
 
+
 @router.get("/strategies")
-async def get_strategies(rankBy : str|None = None,limit:int|None = None) -> StrategyList:
+async def get_strategies(rankBy: str | None = None, limit: int | None = None) -> StrategyList:
     """
-    Returns a list of strategies ranked by rankBy.
-    :param limit: max number of portfolios to return
-    :param rankBy:
-    :return:
+    Return a list of strategies ranked by rankBy.
     """
-    return get_ranked_strat_list(rankBy,limit)
+    return get_ranked_strat_list(rankBy, limit)
+
 
 @router.post("/strategy")
-async def get_strategy(strategy : StrategyID) -> StrategyPrice:
+async def get_strategy(strategy: StrategyID) -> StrategyPrice:
     """
-    Returns a strategy with given ID under current user
-    :param strategy:
-    :return:
+    Return a strategy by ID.
     """
     return get_db_strat(strategy.strategy_id)
-
-
-

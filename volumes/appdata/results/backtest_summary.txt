@@ -1,0 +1,62 @@
+================================================================================
+VHF BACKTEST EVALUATION SUMMARY
+Generated: 2026-04-06T13:55:07.445150+00:00
+================================================================================
+
+Rebalance frequency : 21 trading days
+Date range          : auto → auto
+Live AI calls       : yes
+
+Portfolio: Alpha Fund
+------------------------------------------------------------
+  equal_weight          return=   696.48%  sharpe=    0.57  drawdown=   -84.51%  HHI=  0.2000
+  ai_weighted           return=   852.61%  sharpe=    0.58  drawdown=   -87.64%  HHI=  0.2166
+    → AI calls=249  fallbacks=6  weight_stability=0.1041
+
+  vs equal_weight baseline:
+    ai_weighted           Δreturn=  156.13pp  Δsharpe=   0.014
+
+Portfolio: Alternatives
+------------------------------------------------------------
+  equal_weight          return=   354.47%  sharpe=    0.51  drawdown=   -65.13%  HHI=  0.3336
+  ai_weighted           return=   162.98%  sharpe=    0.45  drawdown=   -65.03%  HHI=  0.3853
+    → AI calls=173  fallbacks=1  weight_stability=0.1979
+
+  vs equal_weight baseline:
+    ai_weighted           Δreturn= -191.49pp  Δsharpe=  -0.060
+
+Portfolio: Balanced Core
+------------------------------------------------------------
+  equal_weight          return=   391.36%  sharpe=    0.47  drawdown=   -70.17%  HHI=  0.2500
+  ai_weighted           return=   331.65%  sharpe=    0.52  drawdown=   -80.04%  HHI=  0.3123
+    → AI calls=139  fallbacks=116  weight_stability=0.0864
+
+  vs equal_weight baseline:
+    ai_weighted           Δreturn=  -59.71pp  Δsharpe=   0.046
+
+Portfolio: Diversified Fund
+------------------------------------------------------------
+  equal_weight          return=   512.26%  sharpe=    0.63  drawdown=   -76.68%  HHI=  0.1000
+  ai_weighted           return=   387.42%  sharpe=    0.64  drawdown=   -83.17%  HHI=  0.1000
+    → AI calls=147  fallbacks=27  weight_stability=0.0459
+
+  vs equal_weight baseline:
+    ai_weighted           Δreturn= -124.84pp  Δsharpe=   0.011
+
+Portfolio: Factor Blend
+------------------------------------------------------------
+  equal_weight          return=   416.99%  sharpe=    0.66  drawdown=   -83.39%  HHI=  0.2500
+  ai_weighted           return=   428.09%  sharpe=    0.66  drawdown=   -83.39%  HHI=  0.2500
+    → AI calls=3  fallbacks=176  weight_stability=0.0164
+
+  vs equal_weight baseline:
+    ai_weighted           Δreturn=   11.09pp  Δsharpe=   0.000
+
+Portfolio: Momentum Trio
+------------------------------------------------------------
+  equal_weight          return=   729.55%  sharpe=    0.56  drawdown=   -84.16%  HHI=  0.3334
+  ai_weighted           return=   843.91%  sharpe=    0.56  drawdown=   -84.38%  HHI=  0.3539
+    → AI calls=255  fallbacks=0  weight_stability=0.1522
+
+  vs equal_weight baseline:
+    ai_weighted           Δreturn=  114.36pp  Δsharpe=  -0.002

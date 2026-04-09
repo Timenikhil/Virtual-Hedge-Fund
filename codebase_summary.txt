@@ -1,0 +1,331 @@
+Virtual Hedge Fund – Codebase Summary
+======================================
+Date: 2026-03-30
+Branch: beef
+
+================================================================================
+1. EXECUTION LAYER
+================================================================================
+
+Entry points
+------------
+- vhf/execution/alpaca_trade_api.py
+  - trade_strategy_to_alpaca()  – one-shot pipeline: generates orders via QuantRocket
+    Moonshot CLI then submits to Alpaca blotter. Returns {status, detail, row_count}.
+  - generate_orders_csv()       – dry-run; returns raw CSV text without submitting.
+  - orders_csv_is_empty()       – heuristic: header-only CSV == no orders.
+
+QuantRocket CLI wrapper
+-----------------------
+- vhf/quantrocket/cli.py
+  - _run_compose_exec()         – executes commands inside the Moonshot Docker container
+    via docker compose exec. Configurable via env vars; 600 s timeout.
+  - moonshot_orders(strategy, review_date, accounts)  – wraps `quantrocket moonshot orders`
+  - moonshot_trade(strategy, review_date, accounts)   – wraps `quantrocket moonshot trade`
+  - realtime_create_tick_db(), realtime_create_agg_db(), realtime_collect(),
+    realtime_stop(), etc.        – realtime data collection commands
+
+Live data streaming
+-------------------
+- vhf/execution/live_data.py
+  - create_tick_db()            – create realtime tick DB (Alpaca / Polygon / IBKR)
+  - create_agg_db()             – create aggregated bar DB from tick data
+  - start_collection(*codes)    – start streaming
+  - stop_collection(*codes)     – stop streaming
+  All wrap the QuantRocket CLI and raise RealtimeError on failure.
+
+Admin API endpoints (vhf/api/v1/admin.py)
+-----------------------------------------
+  POST /api/v1/admin/trade                    – execute one-shot Moonshot trade
+  GET  /api/v1/admin/orders.csv               – dry-run orders CSV
+  POST /api/v1/admin/realtime/create-tick-db
+  POST /api/v1/admin/realtime/create-agg-db
+  POST /api/v1/admin/realtime/start
+  POST /api/v1/admin/realtime/stop
+  GET  /api/v1/admin/realtime/dbs             – list realtime databases
+
+================================================================================
+2. DATA LAYER
+================================================================================
+
+Database connection
+-------------------
+- vhf/db/connection.py
+  - connect()  – initialises a global libSQL client backed by Turso (managed SQLite
+    with remote sync). Reads DB_URL and DB_TOKEN from env vars; local file: vhf.db.
+
+Schema (vhf/db/initialise.py)
+------------------------------
+Table                   Key columns
+-----------------------+----------------------------------------------------------
+portfolios              PID (PK), PNAME, WEIGHTS (csv), SIDS (csv), DATE, LIVE
+strategies              SID (PK), NAME, DESCRIPTION, CATEGORY, P0–P5 (legacy prices)
+strategy_price_history  ID (PK), SID, TS, PRICE; unique index on (SID, TS)
+portfolio_accounts      PID (PK), ACCOUNT  – 1:1 portfolio → QuantRocket account
+portfolio_allocations   ID, PID, METHOD, STRATEGIES, RAW_WEIGHTS, TARGET_WEIGHTS,
+                        META (JSON), CREATED_AT  – allocation audit trail
+rebalance_runs          ID, PID, ACCOUNT, METHOD, THRESHOLD, STRATEGIES,
+                        CURRENT_WEIGHTS, TARGET_WEIGHTS, TRADE_WEIGHTS,
+                        STATUS, META, CREATED_AT
+reconcile_jobs          ID, PID, INTERVAL_SECONDS, METHOD, THRESHOLD, APPLY,
+                        EXECUTE_TRADES, DRY_RUN_TRADES, REVIEW_DATE, ENABLED,
+                        CREATED_AT, UPDATED_AT, LAST_RUN_AT, NEXT_RUN_AT,
+                        LAST_STATUS, LAST_ERROR,
+                        AI_PROVIDER_MODE, AI_STRICT, AI_TIMEOUT_SECONDS, AI_CONTEXT,
+                        LOCKED_AT, LOCKED_BY  – distributed scheduler lock
+
+Data models (Pydantic)
+-----------------------
+- vhf/models/portfolio.py
+    Portfolio, PortfolioCreationRequest, PortfolioWeights
+    PortfolioSelector enum: topk | bottomk | ai
+
+- vhf/models/strategy.py
+    Strategy, StrategyPrice (extends Strategy with price history list)
+
+- vhf/models/allocation.py
+    AllocationMethod enum: manual | equal_weight | score_weighted | ai_weighted
+    AIProviderMode enum: auto | local | remote | disabled
+    AllocationRequest, AllocationResult (includes fallback_applied, ai_provider_name)
+
+- vhf/models/rebalance.py
+    RebalanceRequest, RebalanceLeg (strategy_id, current/target/delta/trade weight,
+    action: buy|sell|hold), RebalancePlan (legs, L1_drift, max_abs_drift,
+    rebalance_required, applied)
+
+- vhf/models/reconcile.py
+    ReconcileJobCreateRequest, ReconcileJob, ReconcileRunResult
+
+Database operations (vhf/db/operations.py)
+-------------------------------------------
+Portfolio CRUD      set_db_pool(), get_db_portfolio(), get_db_portfolio_id(),
+                    update_portfolio_strats(), update_portfolio_weights(), get_sids()
+
+Account mapping     set_portfolio_account(), get_portfolio_account()
+
+Allocation sync     _sync_allocations_from_db()  – persists weights to QuantRocket
+                    allocations YAML via update_account_allocations()
+
+Audit trail         record_allocation_snapshot(), record_rebalance_run(),
+                    record_strategy_price_points()
+
+Scheduler DB ops    create_reconcile_job(), get_reconcile_job(),
+                    list_reconcile_jobs(), list_due_reconcile_jobs(now_iso),
+                    claim_due_reconcile_jobs(worker_id, limit)  – atomic lock claim,
+                    set_reconcile_job_enabled(), update_reconcile_job_after_run()
+
+Helpers             serialize_weights() / deserialize_weights() (csv ↔ list),
+                    _json_dumps_safe() / _json_loads_safe()
+
+================================================================================
+3. PORTFOLIO ALLOCATOR
+================================================================================
+
+Allocation Service (vhf/services/allocation_service.py)
+---------------------------------------------------------
+Primary function: allocate_portfolio(request: AllocationRequest) -> AllocationResult
+
+Method              Behaviour
+------------------+-----------------------------------------------------------------
+equal_weight        1/n to each strategy; always deterministic
+score_weighted      latest price of each strategy used as score signal;
+                    falls back to equal_weight if all scores ≤ 0
+ai_weighted         calls resolve_allocator_provider(), builds context (portfolio_id,
+                    strategy list, current weights, per-strategy name/desc/category/
+                    prices, optional caller-supplied ai_context), sends to provider
+                    with timeout; non-strict mode falls back to equal_weight on error;
+                    strict mode re-raises
+manual              uses raw_weights from request or portfolio.weights;
+                    falls back to equal_weight if none available
+
+Weight helpers
+  _validate_weight_vector() – checks shape, finiteness, non-negativity, sum > 0
+  _normalize()              – divides by sum to produce probability vector
+  record_allocation_snapshot() called on every result for audit trail
+
+AI Provider resolution (vhf/ai/weight_allocator_provider.py)
+--------------------------------------------------------------
+WeightAllocatorProvider protocol: name, allocate(context, *, timeout_seconds)
+
+Implementations
+  DisabledWeightAllocatorProvider  – always raises
+  LocalWeightAllocatorProvider     – dynamic import of vhf.ai.ai_weight_allocator,
+                                     calls allocate_weights()
+  RemoteWeightAllocatorProvider    – HTTP POST to AI_ALLOCATOR_URL with Bearer token
+                                     (AI_ALLOCATOR_API_KEY)
+
+resolve_allocator_provider(mode)
+  auto  → tries local, falls back to remote if AI_ALLOCATOR_URL set, else disabled
+  explicit mode → use directly
+
+AI response parsing (_extract_ai_weights) accepts:
+  list [w1, w2, ...]
+  dict with "weights" / "target_weights" / "raw_weights" key
+  dict with "allocations" map {"sid": weight}
+  flat dict {"sid": weight}
+
+Strategy Selectors
+------------------
+- vhf/ai/selectors.py
+    selectorStrat(sids, selector, k) – topk returns first k; bottomk returns last k;
+    ai currently falls back to topk
+
+- vhf/ai/ai_selectors.py
+    selectStrat(prompt)        – regex parser extracts [A-Za-z0-9_./-]+ tokens,
+                                 returns deduplicated strategy IDs
+    selectSelector(portfolioID) – stub; always returns (PortfolioSelector.topk, 10)
+
+Rebalance Engine (vhf/services/rebalance_engine.py)
+----------------------------------------------------
+Primary function: build_rebalance_plan(request: RebalanceRequest) -> RebalancePlan
+
+Process:
+  1. Calls allocate_portfolio() to compute target weights
+  2. Normalises current_weights (from request or portfolio.weights) and target_weights
+  3. For each strategy leg:
+       delta = target – current
+       if |delta| >= threshold: trade_weight = delta (buy / sell)
+       if |delta| < threshold:  trade_weight = 0   (hold – avoids micro-trades)
+  4. If apply=true AND rebalance_required:
+       update_portfolio_weights() → triggers _sync_allocations_from_db()
+  5. Records rebalance_run audit entry
+
+Drift metrics: L1_drift = Σ|delta|,  max_abs_drift = max(|delta|)
+
+Reconcile Service (vhf/services/reconcile_service.py)
+------------------------------------------------------
+Primary function: run_reconcile_job(job_id) -> ReconcileRunResult
+
+Workflow:
+  1. Load ReconcileJob from DB
+  2. build_rebalance_plan() with job's method / threshold / AI params
+  3. If execute_trades=true:
+       Requires apply=true and mapped account
+       Iterates non-hold legs only
+         dry_run_trades=true  → generate_orders_csv()
+         dry_run_trades=false → trade_strategy_to_alpaca()
+       Collects StrategyTradeResult per leg; captures errors
+  4. Status: "partial_error" | "dry_run" | plan status (applied/needs_rebalance/noop)
+  5. update_reconcile_job_after_run() → persists status, error, next_run_at
+
+Reconcile Scheduler (vhf/services/reconcile_scheduler.py)
+----------------------------------------------------------
+Class: ReconcileScheduler
+
+  __init__(poll_interval_seconds, worker_id)
+    Defaults: 86400 s poll, minimum 5 s, worker_id = "{hostname}:{pid}"
+
+  start() / stop()         – manage background async task
+  run_due_jobs_once()      – claim jobs → execute in thread → return results
+  _run_loop()              – infinite async loop with stop event
+
+Distributed lock:
+  claim_due_reconcile_jobs() atomically sets LOCKED_AT=now, LOCKED_BY=worker_id
+  for jobs where ENABLED=1, NEXT_RUN_AT <= now, and
+  (LOCKED_AT IS NULL OR LOCKED_AT older than DEFAULT_RECONCILE_LOCK_TIMEOUT_SECONDS=3600 s)
+
+Environment overrides:
+  RECONCILE_SCHEDULER_ENABLED        (default: true)
+  RECONCILE_SCHEDULER_POLL_SECONDS   (default: 86400)
+  RECONCILE_SCHEDULER_WORKER_ID      (override worker identity)
+
+Public API endpoints (vhf/api/v1/public.py)
+--------------------------------------------
+  POST /api/v1/select-pool           – create portfolio with explicit strategy list
+  POST /api/v1/ai-select-pool        – create portfolio by parsing AI prompt
+  POST /api/v1/ai-select-portfolio   – update strategies via AI selector
+  POST /api/v1/select-portfolio      – update strategies with explicit selector
+  POST /api/v1/choose-portfolio      – manually set strategies
+  POST /api/v1/seed-portfolio        – normalise and set initial weights
+  POST /api/v1/allocate-portfolio    – compute target weights
+  POST /api/v1/rebalance-plan        – build rebalance plan with threshold filtering
+  GET  /api/v1/portfolios            – list (rankBy: id|name|date|live, limit)
+  GET  /api/v1/portfolio             – get by name
+  POST /api/v1/portfolio_id          – get by ID
+  GET  /api/v1/strategies            – list (rankBy: id|name|category|p0–p5, limit)
+  POST /api/v1/strategy              – get by ID with price history
+
+Admin API endpoints (vhf/api/v1/admin.py)
+------------------------------------------
+  POST /api/v1/admin/reconcile/jobs              – create job
+  GET  /api/v1/admin/reconcile/jobs              – list all
+  GET  /api/v1/admin/reconcile/jobs/{id}         – get by ID
+  POST /api/v1/admin/reconcile/jobs/{id}/enabled – enable / disable
+  POST /api/v1/admin/reconcile/jobs/{id}/run     – execute immediately
+  POST /api/v1/admin/reconcile/scheduler/run-due – one-off scheduler pass
+  POST /api/v1/admin/reconcile/scheduler/start   – start background loop
+  POST /api/v1/admin/reconcile/scheduler/stop    – stop background loop
+  GET  /api/v1/admin/reconcile/scheduler/status  – scheduler status
+
+================================================================================
+4. TEST COVERAGE
+================================================================================
+
+Location: tests/
+
+File                          Cases  What is covered
+-----------------------------+------+------------------------------------------
+test_allocation_service.py      8   manual normalisation, manual→equal fallback,
+                                    score-weighted price usage, negative-weight
+                                    validation, AI list/map response formats,
+                                    non-strict AI fallback, strict AI error
+test_rebalance_engine.py        4   plan building with buy/sell/hold legs,
+                                    apply flag triggers weight update, threshold
+                                    suppresses small drifts, negative threshold
+                                    validation
+test_reconcile_service.py       3   disabled job raises, successful run updates
+                                    job state, only non-hold legs execute trades
+test_reconcile_scheduler.py     1   scheduler claims jobs, executes each,
+                                    collects results (async test)
+test_selectors.py               3   topk, bottomk, prompt parser deduplication
+
+Test pattern
+------------
+- Framework: unittest + unittest.mock
+- All DB operations mocked at call site (no real DB access in unit tests)
+- QuantRocket CLI and remote AI provider calls mocked
+- Assertions target method call counts, arguments, and return values
+
+What is tested
+--------------
+  All allocation methods (manual / equal_weight / score_weighted / ai_weighted)
+  Weight validation and normalisation
+  AI provider fallback (strict vs non-strict)
+  Rebalance plan construction and threshold filtering
+  Reconcile job execution lifecycle and state updates
+  Distributed lock / claim semantics (scheduler)
+  Strategy selection (topk / bottomk / prompt parser)
+
+What is NOT tested
+------------------
+  Real DB persistence
+  Real QuantRocket CLI calls
+  Real HTTP remote AI provider calls
+  Frontend / API integration
+  End-to-end reconcile cycle with live trades
+  Edge cases: malformed DB state, network timeouts, partial trade failures
+
+================================================================================
+END-TO-END FLOW SUMMARY
+================================================================================
+
+Allocation → Trade
+  User → POST /api/v1/allocate-portfolio
+       → allocate_portfolio() [fetch DB, apply method, normalise, record snapshot]
+       → (optional) build_rebalance_plan() [threshold filter, apply weights]
+       → (reconcile job) run_reconcile_job() [trade non-hold legs]
+       → trade_strategy_to_alpaca() → QuantRocket Moonshot CLI → Alpaca blotter
+
+Portfolio weights → QuantRocket
+  update_portfolio_weights()
+    → _sync_allocations_from_db()
+    → update_account_allocations() [write QuantRocket allocations YAML]
+    → QuantRocket reads YAML → Moonshot generates orders
+
+Scheduler loop
+  ReconcileScheduler._run_loop() [async, every POLL_SECONDS]
+    → claim_due_reconcile_jobs(worker_id)  [atomic DB lock]
+    → run_reconcile_job(job_id) per claimed job
+        → build_rebalance_plan() → allocate_portfolio()
+        → execute trades (if enabled)
+        → update_reconcile_job_after_run()

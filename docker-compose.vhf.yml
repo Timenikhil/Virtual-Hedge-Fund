@@ -7,6 +7,8 @@ services:
     env_file:
       - .env
     volumes:
+      # Live-mount source so uvicorn --reload picks up changes without a rebuild.
+      - ./vhf:/app/vhf
       # App-local data (DB, logs, etc.)
       - ./volumes/appdata:/app/data
       - ./logs:/app/logs
@@ -18,5 +20,7 @@ services:
       # Where your QuantRocket docker-compose file lives (for exec commands).
       QUANTROCKET_COMPOSE_DIR: ${QUANTROCKET_COMPOSE_DIR:-.}
       LOG_FILE_PATH: ${LOG_FILE_PATH:-/app/logs/app.log}
+      # QuantRocket houston API gateway — reachable by service name within the shared Docker network.
+      HOUSTON_URL: ${HOUSTON_URL:-http://houston}
     command: uvicorn vhf.main:app --host 0.0.0.0 --port 8000 --reload
     restart: unless-stopped

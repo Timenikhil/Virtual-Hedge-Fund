@@ -1,13 +1,17 @@
-import { Calendar, Layers } from 'lucide-react';
+'use client';
+
 import { useRouter } from 'next/navigation';
+import { TrendingUp, TrendingDown, Radio } from 'lucide-react';
 
 interface Portfolio {
     id: number;
     name: string;
     created_at: string;
     strategy_count: number;
+    strategy_names?: string[];
     total_value?: number;
     return_percentage?: number;
+    live?: boolean;
 }
 
 interface PortfolioTableProps {
@@ -18,58 +22,59 @@ export const PortfolioTable: React.FC<PortfolioTableProps> = ({ portfolios }) =>
     const router = useRouter();
 
     return (
-        <div className="bg-white rounded-lg border overflow-hidden">
-            <div className="overflow-x-auto">
-                <table className="w-full">
-                    <thead className="bg-gray-50 border-b">
-                    <tr>
-                        <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Portfolio Name</th>
-                        <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Created</th>
-                        <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Strategies</th>
-                        <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Total Value</th>
-                        <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Return</th>
-                    </tr>
-                    </thead>
-                    <tbody className="divide-y">
-                    {portfolios.map((portfolio) => (
-                        <tr
-                            key={portfolio.id}
-                            onClick={() => router.push(`/portfolios/${portfolio.id}`)}
-                            className="hover:bg-gray-50 cursor-pointer transition-colors"
-                        >
-                            <td className="px-6 py-4">
-                                <div className="font-semibold text-gray-900">{portfolio.name}</div>
-                            </td>
-                            <td className="px-6 py-4">
-                                <div className="flex items-center gap-2 text-sm text-gray-600">
-                                    <Calendar className="w-4 h-4" />
-                                    {new Date(portfolio.created_at).toLocaleDateString()}
-                                </div>
-                            </td>
-                            <td className="px-6 py-4">
-                                <div className="flex items-center gap-2">
-                                    <Layers className="w-4 h-4 text-gray-400" />
-                                    <span className="font-medium">{portfolio.strategy_count}</span>
-                                </div>
-                            </td>
-                            <td className="px-6 py-4">
-                                <div className="font-medium">${(portfolio.total_value || 0).toLocaleString()}</div>
-                            </td>
-                            <td className="px-6 py-4">
-                                <div className={`inline-flex px-3 py-1 rounded-full text-sm font-medium ${
-                                    (portfolio.return_percentage || 0) >= 0
-                                        ? 'bg-green-100 text-green-700'
-                                        : 'bg-red-100 text-red-700'
-                                }`}>
-                                    {(portfolio.return_percentage || 0) >= 0 ? '+' : ''}
-                                    {portfolio.return_percentage?.toFixed(1)}%
-                                </div>
-                            </td>
-                        </tr>
-                    ))}
-                    </tbody>
-                </table>
-            </div>
+        <div className="grid gap-3">
+            {portfolios.map(portfolio => {
+                const ret = portfolio.return_percentage ?? 0;
+                const positive = ret >= 0;
+                return (
+                    <div
+                        key={portfolio.id}
+                        onClick={() => router.push(`/portfolios/${portfolio.id}`)}
+                        className="bg-white rounded-lg border hover:border-indigo-300 hover:shadow-sm cursor-pointer transition-all px-6 py-4 flex items-center gap-6"
+                    >
+                        {/* Name + badges */}
+                        <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                                <span className="font-semibold text-gray-900 truncate">{portfolio.name}</span>
+                                {portfolio.live && (
+                                    <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-50 text-green-700 border border-green-200">
+                                        <Radio className="w-3 h-3" />
+                                        Live
+                                    </span>
+                                )}
+                                {!portfolio.live && (
+                                    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">
+                                        Paper
+                                    </span>
+                                )}
+                            </div>
+                            <div className="flex flex-wrap gap-1">
+                                {(portfolio.strategy_names ?? []).map(name => (
+                                    <span key={name} className="px-2 py-0.5 rounded text-xs bg-indigo-50 text-indigo-600">
+                                        {name}
+                                    </span>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Created date */}
+                        <div className="text-sm text-gray-400 whitespace-nowrap hidden md:block">
+                            {new Date(portfolio.created_at).toLocaleDateString()}
+                        </div>
+
+                        {/* Return */}
+                        <div className={`flex items-center gap-1.5 text-sm font-semibold whitespace-nowrap px-3 py-1.5 rounded-lg ${
+                            positive ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
+                        }`}>
+                            {positive
+                                ? <TrendingUp className="w-4 h-4" />
+                                : <TrendingDown className="w-4 h-4" />
+                            }
+                            {positive ? '+' : ''}{ret.toFixed(1)}%
+                        </div>
+                    </div>
+                );
+            })}
         </div>
     );
 };

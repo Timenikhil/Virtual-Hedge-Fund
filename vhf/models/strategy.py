@@ -10,13 +10,15 @@ class StrategyID(BaseModel):
 class Strategy(StrategyID):
     name: str
     description: str
-    category : str
+    category: str
+    source: str = "local"
 
 class StrategyList(BaseModel):
     strategies: List[Strategy]
 
 class StrategyPrice(Strategy):
-    prices: List[int] # in cents
+    prices: List[float]
+    dates: List[str] = []  # ISO date strings, same length and order as prices
 
 
 
