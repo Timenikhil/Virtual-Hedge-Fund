@@ -9,7 +9,8 @@ CREATE TABLE IF NOT EXISTS portfolios (PID INTEGER PRIMARY KEY AUTOINCREMENT,
                                        WEIGHTS TEXT,
                                        SIDS TEXT NOT NULL,
                                        DATE TEXT NOT NULL,
-                                       LIVE INTEGER NOT NULL);
+                                       LIVE INTEGER NOT NULL,
+                                       REBALANCER TEXT);
 
 CREATE TABLE IF NOT EXISTS strategies (SID TEXT PRIMARY KEY,
                                        NAME TEXT NOT NULL,
@@ -37,7 +38,8 @@ CREATE TABLE IF NOT EXISTS portfolio_accounts (PID INTEGER PRIMARY KEY,
 --  ranking table - designed to be modular, future work could extend this
 --  by simply adding another column and computing the values
 --  the columns are allowed to be null on purpose allowing users to only rank the strategy with the
---  algorithm they wish NULL rows are deprioritized during selection
+--  algorithm they wish NULL rows are deprioritized during selection and ranking
+--  Errors are precomputed to allow efficient ranking and deduplication
 CREATE TABLE IF NOT EXISTS errors(SID TEXT PRIMARY KEY REFERENCES strategies(SID),
                                   ARIMA REAL,
                                   LSSVM REAL,
