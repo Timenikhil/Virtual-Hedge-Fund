@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS errors(SID TEXT PRIMARY KEY REFERENCES strategies(SID
                                   XAI REAL
                                  );
 
--- corr TABLE
+-- corr TABLE - absolute values are stored
 -- stored in long form to reduce redundancy, every pair is stored exactly once
 CREATE TABLE IF NOT EXISTS corr(SID1 TEXT REFERENCES strategies(SID),
                                 SID2 TEXT REFERENCES strategies(SID),

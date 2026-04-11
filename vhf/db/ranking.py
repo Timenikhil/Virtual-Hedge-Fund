@@ -88,8 +88,33 @@ def getMax(sids,algo,k) -> List[str]:
             raise HTTPException(status_code=404, detail="No matching strategies found")
     return [row[0] for row in record]
 
+# This can be extended to have getTopCorr, getBottomCorr similar to the above errors
 def getCorr(sids,k) -> List[str]:
-    return sids
+    """
+    Retrieves Pairwise Corr < K Strategy from given sids
+
+    :return:
+    """
+
+    placeholders = ', '.join(['?'] * len(sids))
+
+    connection.connect()
+    connection.client.sync()
+    with closing(connection.client.cursor()) as cursor:
+        cursor.execute(
+            f"""
+                SELECT SID1,SID2
+                FROM corr
+                WHERE SID1 IN ({placeholders})
+                AND SID2 IN ({placeholders})
+                AND corr <= ?
+            """,
+            (*sids,*sids,k)
+        )
+        record = cursor.fetchall()
+        if not record:
+            raise HTTPException(status_code=404, detail="No suitable strategies not found")
+    return list(set([row[0] for row in record] + [row[1] for row in record]))
 
 
 # register_strategy
