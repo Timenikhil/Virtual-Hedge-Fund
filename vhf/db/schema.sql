@@ -10,7 +10,8 @@ CREATE TABLE IF NOT EXISTS portfolios (PID INTEGER PRIMARY KEY AUTOINCREMENT,
                                        SIDS TEXT NOT NULL,
                                        DATE TEXT NOT NULL,
                                        LIVE INTEGER NOT NULL,
-                                       REBALANCER TEXT);
+                                       REBALANCER TEXT,
+                                       FID TEXT);
 
 CREATE TABLE IF NOT EXISTS strategies (SID TEXT PRIMARY KEY,
                                        NAME TEXT NOT NULL,
@@ -28,7 +29,7 @@ CREATE TABLE IF NOT EXISTS strategies (SID TEXT PRIMARY KEY,
 -- while ideally this should be SID,TIME,PRICES for the sake of simplicity, we assume
 -- the PRICES series are aligned by time, and are comparable across the different Strategies
 -- in production this should be stored in a different, cheaper DB, as price data can get very large
-CREATE TABLE IF NOT EXISTS PRICES(SID TEXT PRIMARY KEY REFERENCES strategies(SID),
+CREATE TABLE IF NOT EXISTS prices(SID TEXT PRIMARY KEY REFERENCES strategies(SID),
                                   PRICES TEXT);
 
 -- portfolio weights history

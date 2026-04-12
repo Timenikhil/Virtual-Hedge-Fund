@@ -2,6 +2,7 @@ from datetime import datetime
 from contextlib import closing
 from typing import List
 
+import pandas as pd
 from fastapi import HTTPException
 
 from vhf.db import connection
@@ -308,6 +309,47 @@ def get_ranked_list(rankBy: str, limit: int | None) -> PortfolioList:
         )
         return PortfolioList(portfolios=list(map(mapper, record)))
 
+def get_secured_ranked_list(fid:str,rankBy: str, limit: int | None) -> PortfolioList:
+    """
+    Retrieve limit Portfolio by rankBy
+    :param rankBy:
+    :param limit:
+    :return:
+    """
+
+    connection.connect()
+    connection.client.sync()
+    with closing(connection.client.cursor()) as cursor:
+        if limit:
+            cursor.execute(
+                """
+                SELECT PID, PNAME, WEIGHTS, SIDS, LIVE,DATE
+                FROM portfolios
+                WHERE FID  = ? OR FID ISNULL 
+                LIMIT ?
+                """,
+                (limit,fid),
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT PID, PNAME, WEIGHTS, SIDS, LIVE,DATE
+                FROM portfolios
+                WHERE FID  = ? OR FID ISNULL
+                """
+            )
+        record = cursor.fetchall()
+        if not record:
+            return PortfolioList(portfolios=[])
+        mapper = lambda row: Portfolio(
+            portfolio_id=int(row[0]),
+            portfolio_name=row[1],
+            weights=deserialize_weights(row[2]),
+            strategies=deserialize_strategies(row[3]),
+            live=bool(int(row[4])),
+            date=row[5],
+        )
+        return PortfolioList(portfolios=list(map(mapper, record)))
 
 def get_ranked_strat_list(rankBy: str, limit: int | None) -> StrategyList:
     """
@@ -388,3 +430,61 @@ def set_db_allocator(portfolioID : int,allocator : str):
         connection.client.commit()
         connection.client.sync()
     _sync_allocations_from_db(portfolioID)
+
+def get_prices(sid:str) -> pd.Series:
+    connection.connect()
+    connection.client.sync()
+    with closing(connection.client.cursor()) as cursor:
+        cursor.execute(
+            """
+            SELECT PRICES
+            FROM prices
+            WHERE SID  = ?""",
+            (sid,),
+        )
+        record = cursor.fetchone()
+        if not record:
+            raise HTTPException(status_code=404, detail="Portfolio not found")
+        return pd.Series(deserialize_weights(record[0]))
+
+def store_prices(sid:str,prices:pd.Series) -> None:
+    connection.connect()
+    connection.client.sync()
+    with closing(connection.client.cursor()) as cursor:
+        cursor.execute(
+            """
+            INSERT INTO prices
+            VALUES (?,?)""",
+            (sid,serialize_weights(prices)),
+        )
+        connection.client.commit()
+        connection.client.sync()
+
+def store_strategy(sid,name,description,category,prices):
+    connection.connect()
+    connection.client.sync()
+    with closing(connection.client.cursor()) as cursor:
+        with closing(connection.client.cursor()) as cursor:
+            cursor.execute(
+                """
+                INSERT INTO strategies
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                (sid,name,description,category,*prices,"local"),
+            )
+            connection.client.commit()
+            connection.client.sync()
+
+
+def get_all_sids() -> List[str]:
+    connection.connect()
+    connection.client.sync()
+    with closing(connection.client.cursor()) as cursor:
+        cursor.execute(
+            """
+            SELECT SID
+            FROM strategies"""
+        )
+        record = cursor.fetchall()
+        if not record:
+            raise HTTPException(status_code=404, detail="Portfolio not found")
+        return record

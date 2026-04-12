@@ -1,7 +1,7 @@
 import datetime
 from typing import List
 
-from fastapi import APIRouter, Path, HTTPException, Security
+from fastapi import APIRouter, Path, HTTPException, Security, Depends
 
 from vhf.ai.ai_selectors import selectStrat, selectSelector
 from vhf.ai.selectors import selectorStrat
@@ -9,7 +9,7 @@ from vhf.allocators.scheduler import attach_scheduler
 from vhf.authentication.authentication import get_current_user
 from vhf.db.operations import set_db_pool, get_db_portfolio, update_portfolio_weights, update_portfolio_strats, \
     get_ranked_list, get_sids, get_db_portfolio_id, get_ranked_strat_list, get_db_strat, delete_db_portfolio_id, \
-    set_db_allocator
+    set_db_allocator, get_secured_ranked_list
 from vhf.models.error import HTTPError
 from vhf.logging.log import logger
 from vhf.models.portfolio import Portfolio, PortfolioList, \
@@ -17,6 +17,8 @@ from vhf.models.portfolio import Portfolio, PortfolioList, \
     PortfolioAllocator
 from vhf.models.strategy import StrategyID, StrategyPrice, StrategyList
 from pydantic import BaseModel
+
+from vhf.models.user import FirebaseUser, UserRole
 
 router = APIRouter(dependencies= [Security(get_current_user)])
 
@@ -27,16 +29,16 @@ class AiPortfolioCreationRequest(BaseModel):
     prompt: str | None = None
 
 @router.post("/select-pool")
-async def select_pool(pool: PortfolioCreationRequest) -> int:
+async def select_pool(pool: PortfolioCreationRequest,user : FirebaseUser = Depends(get_current_user)) -> int:
     """
     Selects Strategy pool from all strategies
     :param pool:
     :return: Portfolio ID
     """
-    return set_db_pool(pool,datetime.datetime.today().isoformat())
+    return set_db_pool(pool,datetime.datetime.today().isoformat(),user.user_id)
 
 @router.post("/ai-select-pool")
-async def ai_select_pool(req: AiPortfolioCreationRequest) -> int:
+async def ai_select_pool(req: AiPortfolioCreationRequest,user : FirebaseUser = Depends(get_current_user)) -> int:
     """
     Selects Strategy pool from all strategies
     :param poolName:
@@ -47,7 +49,7 @@ async def ai_select_pool(req: AiPortfolioCreationRequest) -> int:
         account=req.account,
         strategies=selectStrat(req.prompt),
     )
-    return set_db_pool(pool, datetime.datetime.today().isoformat())
+    return set_db_pool(pool, datetime.datetime.today().isoformat(),user.user_id)
 
 @router.post("/ai-select-portfolio")
 async def select_portfolio(pid: PortfolioID) -> List[str]:
@@ -100,14 +102,17 @@ async def seed_portfolio(portfolioWeights : PortfolioWeights) -> None:
     update_portfolio_weights(portfolioWeights.portfolio_id, weights)
 
 @router.get("/portfolios")
-async def get_portfolios(rankBy : str|None = None,limit:int|None = None) -> PortfolioList:
+async def get_portfolios(rankBy : str|None = None,limit:int|None = None,user : FirebaseUser = Depends(get_current_user)) -> PortfolioList:
     """
     Returns a list of portfolios ranked by rankBy.
     :param limit: max number of portfolios to return
     :param rankBy:
     :return:
     """
-    return get_ranked_list(rankBy,limit)
+    if user.role != UserRole.PUBLIC:
+        return get_ranked_list(rankBy,limit)
+    else:
+        return get_secured_ranked_list(user.user_id,rankBy,limit)
 
 @router.get("/portfolio")
 async def get_portfolio(portfolioName : str) -> Portfolio:
