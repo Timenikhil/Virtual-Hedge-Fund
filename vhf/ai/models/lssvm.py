@@ -8,6 +8,7 @@ class LSSVM(BaseEstimator, RegressorMixin):
     def __init__(self, lookback_period=10):
         super().__init__()
         self.n = lookback_period
+        self.history_ = []
 
     def _apply_positional_encoding(self, X):
         """
@@ -33,15 +34,17 @@ class LSSVM(BaseEstimator, RegressorMixin):
         self.model_ = NeoLSSVM()
         X_w = self._apply_positional_encoding(X_w)
         self.model_.fit(X_w, t_w)
-
+        self.history_ = y[-self.n:]
         self.fitted_ = True
         return self
 
     def predict(self, X):
         check_is_fitted(self)
         # X = [[1]] → next-step forecast
-        fc = self.model_.predict(n_periods=X[0][0])
+        fc = self.model_.predict(np.ndarray(self.history_))
         return fc
 
     def partial_fit(self, X, y: np.ndarray):
+        self.history_.extend(y[0])
+        self.history_ = self.history_[1:]
         return self

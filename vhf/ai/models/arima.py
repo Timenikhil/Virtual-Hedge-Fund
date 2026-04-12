@@ -1,6 +1,6 @@
 import numpy as np
 import pmdarima as pm
-from sklearn.base import BaseEstimator, ClassifierMixin, RegressorMixin  # or RegressorMixin
+from sklearn.base import BaseEstimator, ClassifierMixin, RegressorMixin
 from sklearn.utils.validation import check_X_y, check_array, check_is_fitted
 
 class ARIMA(BaseEstimator, RegressorMixin):
