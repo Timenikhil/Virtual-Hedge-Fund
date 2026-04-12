@@ -17,6 +17,9 @@ opentelemetry-exporter-otlp = "^1.38.0"
 libsql-client = "^0.3.1"
 libsql = "^0.1.11"
 pandas = "^3.0.2"
+scipy = "^1.17.1"
+scipy-stubs = "~=1.17.1"
+firebase-admin = "^7.4.0"
 
 
 

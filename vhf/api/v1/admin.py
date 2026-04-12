@@ -1,7 +1,11 @@
 from __future__ import annotations
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Security
 from pydantic import BaseModel
 from typing import Dict, Optional, List
+
+from requests import HTTPError
+
+from vhf.authentication.authentication import check_role
 from vhf.execution.alpaca_trade_api import (
     trade_strategy_to_alpaca,
     generate_orders_csv,
@@ -17,9 +21,19 @@ from vhf.execution.live_data import (
     get_db,
     RealtimeError,
 )
+from vhf.models.user import UserRole
 
-
-router = APIRouter()
+router = APIRouter(
+                       prefix="/admin",
+                       tags=["admin"],
+                       responses={
+                           400: {
+                               "model": HTTPError,
+                               "description": "Invalid request."
+                           }
+                       },
+    dependencies=[Security(check_role([UserRole.ADMIN, UserRole.CFL]))]
+)
 
 
 class TradeRequest(BaseModel):

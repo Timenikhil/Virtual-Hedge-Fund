@@ -1,11 +1,12 @@
 import datetime
 from typing import List
 
-from fastapi import APIRouter, Path, HTTPException
+from fastapi import APIRouter, Path, HTTPException, Security
 
 from vhf.ai.ai_selectors import selectStrat, selectSelector
 from vhf.ai.selectors import selectorStrat
 from vhf.allocators.scheduler import attach_scheduler
+from vhf.authentication.authentication import get_current_user
 from vhf.db.operations import set_db_pool, get_db_portfolio, update_portfolio_weights, update_portfolio_strats, \
     get_ranked_list, get_sids, get_db_portfolio_id, get_ranked_strat_list, get_db_strat, delete_db_portfolio_id, \
     set_db_allocator
@@ -17,7 +18,7 @@ from vhf.models.portfolio import Portfolio, PortfolioList, \
 from vhf.models.strategy import StrategyID, StrategyPrice, StrategyList
 from pydantic import BaseModel
 
-router = APIRouter()
+router = APIRouter(dependencies= [Security(get_current_user)])
 
 
 class AiPortfolioCreationRequest(BaseModel):

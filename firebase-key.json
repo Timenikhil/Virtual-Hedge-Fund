@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "virtual-hedge-fund-e92de",
+  "private_key_id": "67e6693524efbead4511b2a4a67334995ec8b954",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQCy5ITQFN6Tmwl5\ncTa8orRaAxBIIT5+WYXTPw1pryMJJCCrQSeQTG2IK0gBe7QfphgAaar22+vhUsGr\nE/+3QYjSMTdaJ4YLAEqJrm3ppefKQWS60fYANf8W/LgeBBRZBd7MHuIzxFx/Usbe\nMPAKahBDkUN3kRggltjfaM0pdmWEBFAm6AtNiJ4+4VC8gZiOmW2/x5SKmYOcPtkc\nXI37PYssLT8DAO9CMdQkHqHJMKsCr6IHiQ5adpIkz8PzBM7lKrGPwxxX6H8aLKlX\nP+aS0PkJNpAsfFa5/USyOZGL8jA2+hTxwdp3sTvvattvQvohvB/0GyWn8GnEEYFt\nnvGXO0bnAgMBAAECggEAVJB5x/NVk+kB/YprGZjAMJyqIa61X/zpqgZwTLkhkryl\nRM8z6J54WJo9G5Zie2OEjQ1mZ/Nl+cmpCzoU84fjKZliVRfB4Yltss/l3UEz5QQs\nnbOK2masAy3Ly0SaacrAmzUuMNJt9zImF/qCPioNLiOJBQhto1orgtCDy0nQiyrE\nN8oDISMEOnSZHDhbUE3u/2LNe9Ffiz8ytIxt4uTZx926mEjq7BdZ29i0Uo5aKS6y\nrnq6uHqUv2LZxHGcyviZVHwSgBNZCBAGwxXeEFH69D0nCkIjtzPE7fJfKB9lt09X\nCJLHsqswka4HkdMp9rgCLeKkTajYFRuRR09mwbuQwQKBgQDgvZ/dRLGAmdkNrBaX\na8PAWYDDwxQy5nO6yXyVXnTdhh2vE1JHFjfOOa25PlK9EAyg/C5Acb4m2E1Poqym\nXJkI/92QWrGgO0JcpU3VuWlZP8ffTvkOtfcplpuf75eFpTmaPV0QUqqbzdhf4Bsp\nGMs7CfQHd81uKDXX4wQCu5pLjwKBgQDLxmAemwTAY2oBR96pq7t4u/g9cBp9ykOV\nJ0jMB1vtK/cEItH29pOKd5/xNWa7epQ68crpg+3jw063SUapq0OEbPKLl1xpCiP8\n4Mb8zPns4eyZElKcMS3mvKByXe2KjRUkqrohuYMDL3/UgfHPCUFW1a+T/Q8z0Rw6\nsGE8yfWDKQKBgCIl7fKLC4WE2uwu58feQgIqF1yneZw6U/9fuiRgE9XNGRmPEANp\nJtWZAgKRq7S6iZC0gLqeDcyNNUISb7VfgIlTh3D1tuOn3W+CVo9Q+ubqwA34S/Om\nRoX1MnRczWMrNdNv24ItbWr7HhODU90svUSdQI0Z8Qb56SSChAt+QfWVAoGACtYA\ntH/vz785mtnUiFc+f9wXBkVY00mXMG5HW7okdEc7OngTjDtuexWDZtM9JEkPatcC\nwEoos0zmea6m2EzoKTmV6EBjRJ6qbT8Stcy8mZEmALnNtMqUs0liitJd2FlKP4no\nnfR8eAXlmUpTrnvCgriYPpldXpcHFkPc19uxd4kCgYAAlEe1VeSEscq6QpG4RZQ6\nc0r47a9HXgIOvCS4XRyvUh0+Jj4b2osS+awBVoLeLLurMIdTlZ0qDw8RQWync+O7\nu1lB9GROhcQ10osyDg4bwsJC29pDq5gCEz50TxJBko7pDsz+NjSA9eY22xZ+zlHy\nUFd5gvDl6CqJu7rPoi3wRQ==\n-----END PRIVATE KEY-----\n",
+  "client_email": "firebase-adminsdk-fbsvc@virtual-hedge-fund-e92de.iam.gserviceaccount.com",
+  "client_id": "116254107791071762355",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-fbsvc%40virtual-hedge-fund-e92de.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}

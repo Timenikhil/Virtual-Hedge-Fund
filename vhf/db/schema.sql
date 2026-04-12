@@ -21,7 +21,15 @@ CREATE TABLE IF NOT EXISTS strategies (SID TEXT PRIMARY KEY,
                                        P2 INTEGER NOT NULL,
                                        P3 INTEGER NOT NULL,
                                        P4 INTEGER NOT NULL,
-                                       P5 INTEGER NOT NULL);
+                                       P5 INTEGER NOT NULL,
+                                       SOURCE TEXT);
+
+-- violates 1NF for ease of retrieval
+-- while ideally this should be SID,TIME,PRICES for the sake of simplicity, we assume
+-- the PRICES series are aligned by time, and are comparable across the different Strategies
+-- in production this should be stored in a different, cheaper DB, as price data can get very large
+CREATE TABLE IF NOT EXISTS PRICES(SID TEXT PRIMARY KEY REFERENCES strategies(SID),
+                                  PRICES TEXT);
 
 -- portfolio weights history
 CREATE TABLE IF NOT EXISTS phistory(PID INTEGER REFERENCES portfolios(PID),

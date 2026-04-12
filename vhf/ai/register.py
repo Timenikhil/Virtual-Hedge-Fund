@@ -1,4 +1,9 @@
-def register_strategy(sid,name,description,category,prices,algos=[],computeCorr=True):
+import pandas as pd
+
+from vhf.db.ranking import insert_error, insert_corr
+
+
+def register_strategy(sid,name,description,category,prices:pd.Series,algos=[],computeCorr=True):
     """
 
     :param sid:
@@ -17,4 +22,18 @@ def register_strategy(sid,name,description,category,prices,algos=[],computeCorr=
     The parameters are allowed to be null, as training so many models and finding correlations
     can be time consuming
     """
-    pass
+
+    store_strategy(sid,name,description,category,prices[-5:])
+    store_prices(sid,prices)
+
+    for algo in algos:
+        error = train_model(algo,prices.ffill(),sid)
+        insert_error(sid,algo,error)
+
+    if computeCorr:
+        sids = get_all_sids()
+        for osid in sids:
+            if osid == sid:
+                continue
+            oprice = get_prices(osid)
+            insert_corr(sid,osid,prices.corr(oprice))
