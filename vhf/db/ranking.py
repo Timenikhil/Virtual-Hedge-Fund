@@ -113,15 +113,37 @@ def getCorr(sids,k) -> List[str]:
         )
         record = cursor.fetchall()
         if not record:
-            raise HTTPException(status_code=404, detail="No suitable strategies not found")
+            raise HTTPException(status_code=404, detail="No suitable strategies found")
     return list(set([row[0] for row in record] + [row[1] for row in record]))
 
-
-# register_strategy
-#
-def insert_error(algo,value):
-    pass
+def insert_error(sid,algo,value):
+    """
+    """
+    connection.connect()
+    connection.client.sync()
+    with closing(connection.client.cursor()) as cursor:
+        cursor.execute(
+            f"""
+            INSERT INTO errors (SID, {algo}) 
+            VALUES (?, ?)
+            ON CONFLICT(SID) DO UPDATE SET 
+                {algo} = excluded.{algo}
+            """,
+            (sid,value),
+        )
+        connection.client.commit()
+        connection.client.sync()
 
 def insert_corr(sid1,sid2,value):
     value = abs(value)
-    pass
+    connection.connect()
+    connection.client.sync()
+    with closing(connection.client.cursor()) as cursor:
+        cursor.execute(
+            f"""
+                INSERT INTO corr 
+                VALUES (?,?,?)""",
+            (sid1,sid2,value),
+        )
+        connection.client.commit()
+        connection.client.sync()
