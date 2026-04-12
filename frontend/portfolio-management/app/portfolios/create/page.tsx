@@ -7,7 +7,6 @@ import { StrategySelector, Strategy } from '@/components/StrategySelector';
 import { StepCard } from '@/components/StepCard';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import {useRouter} from "next/navigation";
-import DurationControl from "react-duration-control";
 import "react-duration-control/dist/react-duration-control.css";
 
 
@@ -43,12 +42,11 @@ export default function PortfolioManagement() {
 
 
     const [stepStatus, setStepStatus] = useState({
-        //TODO
         1: 'active' as 'active' | 'completed' | 'pending',
         2: 'pending' as 'active' | 'completed' | 'pending',
         3: 'pending' as 'active' | 'completed' | 'pending',
         4: 'pending' as 'active' | 'completed' | 'pending',
-        5: 'active' as 'active' | 'completed' | 'pending',
+        5: 'pending' as 'active' | 'completed' | 'pending',
     });
 
     const handleStepComplete = useCallback((step: number) => {
@@ -390,7 +388,7 @@ export default function PortfolioManagement() {
                         onStepClick={handleStepClick}
                     >
                         <div className="mt-4 space-y-3">
-                            <p className="text-sm text-gray-600">Configure automatic rebalancing algorithm</p>
+                            <p className="text-sm text-gray-600">Configure automatic rebalancing algorithm and rebalancing interval (in s)</p>
 
                             <div className="mt-4 space-y-3">
                                 {workflowMode === 'manual' && (
@@ -410,23 +408,14 @@ export default function PortfolioManagement() {
                                         </select>
                                         {allocator && allocator !== "" &&
                                             (
-                                                <DurationControl
-                                                    label="Rebalance Interval"
-                                                    pattern="Days {dd} Hours {hh} Minutes {mm} Seconds {ss}"
-                                                    value={(interval || 0) * 1000}
-                                                    onChange={(ms) => setInterval(ms / 1000)}
-                                                    className="w-full px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                                />
-                                            )
-                                        //     (
-                                        //     <input
-                                        //         type="number"
-                                        //         placeholder="Rebalance interval"
-                                        //         value={interval || ''}
-                                        //         onChange={(e) => setInterval(e.target.value ? parseInt(e.target.value) : null)}
-                                        //         className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                        //     />
-                                        // )
+                                            <input
+                                                type="number"
+                                                placeholder="Rebalance interval"
+                                                value={interval || ''}
+                                                onChange={(e) => setInterval(e.target.value ? parseInt(e.target.value) : null)}
+                                                className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            />
+                                        )
                                         }
                                     </>
                                 )}

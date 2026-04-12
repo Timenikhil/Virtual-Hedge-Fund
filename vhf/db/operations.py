@@ -383,7 +383,7 @@ def set_db_allocator(portfolioID : int,allocator : str):
             UPDATE portfolios
             SET REBALANCER = ?
             WHERE PID = ?""",
-            (serialize_weights(allocator), portfolioID),
+            (allocator, portfolioID),
         )
         connection.client.commit()
         connection.client.sync()
