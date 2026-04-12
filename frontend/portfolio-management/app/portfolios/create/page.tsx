@@ -7,6 +7,9 @@ import { StrategySelector, Strategy } from '@/components/StrategySelector';
 import { StepCard } from '@/components/StepCard';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import {useRouter} from "next/navigation";
+import DurationControl from "react-duration-control";
+import "react-duration-control/dist/react-duration-control.css";
+
 
 // const INITIAL_STRATEGIES: Strategy[] = [
 //     { id: 'strat-1', name: 'Momentum Strategy', description: 'Trend-following based on price momentum', category: 'Trend' },
@@ -31,16 +34,21 @@ export default function PortfolioManagement() {
     const [strategies, setStrategies] = useState<Strategy[]>(INITIAL_STRATEGIES);
     const [selectedStrategies, setSelectedStrategies] = useState<string[]>([]);
     const [aiPrompt, setAiPrompt] = useState('');
+    const [ranker, setRanker] = useState<string | null>('XAI');
     const [selector, setSelector] = useState<string | null>('top');
     const [selectorK, setSelectorK] = useState<number | null>(10);
     const [weights, setWeights] = useState<number[]>([]);
+    const [allocator, setAllocator] = useState<string | null>("");
+    const [interval, setInterval] = useState<number | null>(86400);
+
 
     const [stepStatus, setStepStatus] = useState({
+        //TODO
         1: 'active' as 'active' | 'completed' | 'pending',
         2: 'pending' as 'active' | 'completed' | 'pending',
         3: 'pending' as 'active' | 'completed' | 'pending',
         4: 'pending' as 'active' | 'completed' | 'pending',
-        5: 'pending' as 'active' | 'completed' | 'pending',
+        5: 'active' as 'active' | 'completed' | 'pending',
     });
 
     const handleStepComplete = useCallback((step: number) => {
@@ -81,7 +89,7 @@ export default function PortfolioManagement() {
         try {
             let strats : string[]
             if (workflowMode === 'manual') {
-                strats = await portfolioAPI.selectPortfolio(portfolioId, selector, selectorK);
+                strats = await portfolioAPI.selectPortfolio(portfolioId, ranker, selector, selectorK);
             } else {
                 strats = await portfolioAPI.aiSelectPortfolio(portfolioId);
             }
@@ -121,6 +129,15 @@ export default function PortfolioManagement() {
         }
     };
 
+    const handleStep5Submit = async () => {
+        if (!portfolioId) return;
+        try {
+            await portfolioAPI.setAllocator(portfolioId,allocator,interval);
+            router.push(`/portfolios/${portfolioId}`);
+        } catch (error) {
+            console.error('Error in Step 5:', error);
+        }
+    };
 
     const toggleStrategy = useCallback((strategyId: string) => {
         setSelectedStrategies(prev =>
@@ -236,6 +253,22 @@ export default function PortfolioManagement() {
                         isPending={stepStatus[2] === 'pending'}
                         onStepClick={handleStepClick}
                     >
+                        <div className="mt-4 space-y-3">
+                            {workflowMode === 'manual' && (
+                                <>
+                                    <select
+                                        value={ranker || 'XAI'}
+                                        onChange={(e) => setRanker(e.target.value || null)}
+                                        className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    >
+                                        <option value="ARIMA">ARIMA</option>
+                                        <option value="LSSVM">LSSVM </option>
+                                        <option value="EXPERT">ARIMA + LSSVM </option>
+                                        <option value="XAI"> XAI </option>
+                                    </select>
+                                </>
+                            )}
+                        </div>
                         <div className="mt-4 space-y-3">
                             {workflowMode === 'manual' && (
                                 <>
@@ -357,9 +390,50 @@ export default function PortfolioManagement() {
                         onStepClick={handleStepClick}
                     >
                         <div className="mt-4 space-y-3">
-                            <p className="text-sm text-gray-600">Configure automatic rebalancing rules</p>
+                            <p className="text-sm text-gray-600">Configure automatic rebalancing algorithm</p>
+
+                            <div className="mt-4 space-y-3">
+                                {workflowMode === 'manual' && (
+                                    <>
+                                        <select
+                                            value={allocator || ''}
+                                            onChange={(e) => setAllocator(e.target.value || null)}
+                                            className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        >
+                                            <option value= "">Buy and Hold</option>
+                                            <option value="EQUAL">Equal</option>
+                                            <option value="MVO">Markowitz</option>
+                                            <option value="ARIMA">ARIMA</option>
+                                            <option value="LSSVM">LSSVM</option>
+                                            <option value="EXPERT">ARIMA + LSSVM </option>
+                                            <option value="XAI"> XAI </option>
+                                        </select>
+                                        {allocator && allocator !== "" &&
+                                            (
+                                                <DurationControl
+                                                    label="Rebalance Interval"
+                                                    pattern="Days {dd} Hours {hh} Minutes {mm} Seconds {ss}"
+                                                    value={(interval || 0) * 1000}
+                                                    onChange={(ms) => setInterval(ms / 1000)}
+                                                    className="w-full px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                />
+                                            )
+                                        //     (
+                                        //     <input
+                                        //         type="number"
+                                        //         placeholder="Rebalance interval"
+                                        //         value={interval || ''}
+                                        //         onChange={(e) => setInterval(e.target.value ? parseInt(e.target.value) : null)}
+                                        //         className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        //     />
+                                        // )
+                                        }
+                                    </>
+                                )}
+                            </div>
+
                             <button
-                                onClick={() => router.push(`/portfolios/${portfolioId}`)}
+                                onClick={handleStep5Submit}
                                 disabled={!portfolioId}
                                 className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
                             >

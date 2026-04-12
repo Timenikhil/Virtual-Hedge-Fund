@@ -6,11 +6,13 @@ from fastapi import APIRouter, Path, HTTPException
 from vhf.ai.ai_selectors import selectStrat, selectSelector
 from vhf.ai.selectors import selectorStrat
 from vhf.db.operations import set_db_pool, get_db_portfolio, update_portfolio_weights, update_portfolio_strats, \
-    get_ranked_list, get_sids, get_db_portfolio_id, get_ranked_strat_list, get_db_strat, delete_db_portfolio_id
+    get_ranked_list, get_sids, get_db_portfolio_id, get_ranked_strat_list, get_db_strat, delete_db_portfolio_id, \
+    set_db_allocator
 from vhf.models.error import HTTPError
 from vhf.logging.log import logger
 from vhf.models.portfolio import Portfolio, PortfolioList, \
-    PortfolioSelectorRequest, PortfolioWeights, PortfolioCreationRequest, PortfolioRequest, PortfolioID
+    PortfolioSelectorRequest, PortfolioWeights, PortfolioCreationRequest, PortfolioRequest, PortfolioID, \
+    PortfolioAllocator
 from vhf.models.strategy import StrategyID, StrategyPrice, StrategyList
 from pydantic import BaseModel
 
@@ -150,4 +152,18 @@ async def get_strategy(strategy : StrategyID) -> StrategyPrice:
     :return:
     """
     return get_db_strat(strategy.strategy_id)
+
+@router.post("/select-allocator")
+async def set_allocator(portfolio_alloc : PortfolioAllocator) -> None:
+    """
+
+    Updates portfolio DB with allocator
+
+    if allocator is not Buy and Hold (None), set up scheduler
+
+    """
+
+    if portfolio_alloc.allocator is not None:
+        set_db_allocator(portfolio_alloc.portfolio_id,portfolio_alloc.allocator.value)
+        attach_scheduler(portfolio_alloc.portfolio_id,portfolio_alloc.interval)
 

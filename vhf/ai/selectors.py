@@ -4,8 +4,10 @@ from vhf.db.ranking import getTop, getBottom, getCorr, getMax
 from vhf.models.portfolio import PortfolioSelector
 
 
-def selectorStrat(sids:List[str],selector:PortfolioSelector,k,algo ="XAI") -> List[str]:
+def selectorStrat(sids:List[str],selector:PortfolioSelector | None,k,algo ="XAI") -> List[str]:
     match selector:
+        case None:
+            return sids
         case PortfolioSelector.top:
             return getTop(sids,algo,k)
 

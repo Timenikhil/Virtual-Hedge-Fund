@@ -367,3 +367,24 @@ def get_sids(pid: int) -> List[str]:
         if not record:
             raise HTTPException(status_code=404, detail="Portfolio not found")
         return deserialize_strategies(record[0])
+
+def set_db_allocator(portfolioID : int,allocator : str):
+    """
+    Store the given Portfolio Rebalancer
+    :param portfolioID: portfolio id
+    :param allocator : allocator
+
+    """
+    connection.connect()
+    connection.client.sync()
+    with closing(connection.client.cursor()) as cursor:
+        cursor.execute(
+            """
+            UPDATE portfolios
+            SET REBALANCER = ?
+            WHERE PID = ?""",
+            (serialize_weights(allocator), portfolioID),
+        )
+        connection.client.commit()
+        connection.client.sync()
+    _sync_allocations_from_db(portfolioID)

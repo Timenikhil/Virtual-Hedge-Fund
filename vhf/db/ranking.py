@@ -119,4 +119,9 @@ def getCorr(sids,k) -> List[str]:
 
 # register_strategy
 #
-# insert_error(algo,value)
+def insert_error(algo,value):
+    pass
+
+def insert_corr(sid1,sid2,value):
+    value = abs(value)
+    pass

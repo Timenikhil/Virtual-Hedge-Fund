@@ -49,6 +49,10 @@ class PortfolioWeights(PortfolioID):
     weights : List[float]
 
 class PortfolioSelectorRequest(PortfolioID) :
+    ranker: PortfolioRanker  = PortfolioRanker.xai
     selector : PortfolioSelector | None = None,
     k:int = 10
-    ranker : PortfolioRanker = PortfolioRanker.xai
+
+class PortfolioAllocator(PortfolioID):
+    allocator : PortfolioRebalancer | None = None
+    interval : int = 86400 # rebalance interval in seconds

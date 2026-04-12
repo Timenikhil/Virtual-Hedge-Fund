@@ -11,9 +11,10 @@
   "dependencies": {
     "firebase": "^12.8.0",
     "lucide-react": "^0.562.0",
-    "next": "16.1.4",
+    "next": "^16.2.3",
     "react": "19.2.3",
     "react-dom": "19.2.3",
+    "react-duration-control": "^2.0.2",
     "recharts": "^3.7.0"
   },
   "devDependencies": {

@@ -212,12 +212,13 @@ export const portfolioAPI = {
         return await response.json();
     },
 
-    selectPortfolio: async (portfolio_id: number, selector: string | null, k: number | null): Promise<string[]> => {
+    selectPortfolio: async (portfolio_id: number,ranker:string | null, selector: string | null, k: number | null): Promise<string[]> => {
         const response = await fetch(`${API_BASE_URL}/select-portfolio`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 portfolio_id,
+                ranker:ranker,
                 selector: selector || null,
                 k: k || null
             }),
@@ -259,6 +260,21 @@ export const portfolioAPI = {
             credentials: 'include'
         });
         if (!response.ok) throw new Error('Failed to seed portfolio');
-    }
+    },
+
+    setAllocator: async (portfolio_id: number,allocator:string | null,interval:number | null): Promise<void> => {
+        const response = await fetch(`${API_BASE_URL}/select-allocator`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                portfolio_id,
+                allocator : allocator || null,
+                interval : interval || 86400 // daily rebalancing
+            }),
+            credentials: 'include'
+        });
+        if (!response.ok) throw new Error('Failed to set portfolio allocator');
+    },
+
 
 };
