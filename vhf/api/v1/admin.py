@@ -24,15 +24,15 @@ from vhf.execution.live_data import (
 from vhf.models.user import UserRole
 
 router = APIRouter(
-                       prefix="/admin",
-                       tags=["admin"],
-                       responses={
-                           400: {
-                               "model": HTTPError,
-                               "description": "Invalid request."
-                           }
-                       },
-    dependencies=[Security(check_role([UserRole.ADMIN, UserRole.CFL]))]
+    #                    prefix="/admin",
+    #                    tags=["admin"],
+    #                    responses={
+    #                        400: {
+    #                            "model": HTTPError,
+    #                            "description": "Invalid request."
+    #                        }
+    #                    },
+    # dependencies=[Security(check_role([UserRole.ADMIN, UserRole.CFL]))]
 )
 
 
@@ -43,7 +43,7 @@ class TradeRequest(BaseModel):
     dry_run: bool = False
 
 
-@router.post("/trade")
+@router.post("/trade",response_model=None)
 def trade(req: TradeRequest):
     """
     Execute a one-shot Moonshot trade for a strategy.

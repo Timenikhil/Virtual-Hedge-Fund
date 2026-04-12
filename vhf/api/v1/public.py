@@ -20,7 +20,9 @@ from pydantic import BaseModel
 
 from vhf.models.user import FirebaseUser, UserRole
 
-router = APIRouter(dependencies= [Security(get_current_user)])
+router = APIRouter(
+    # dependencies= [Security(get_current_user)]
+)
 
 
 class AiPortfolioCreationRequest(BaseModel):
@@ -29,16 +31,20 @@ class AiPortfolioCreationRequest(BaseModel):
     prompt: str | None = None
 
 @router.post("/select-pool")
-async def select_pool(pool: PortfolioCreationRequest,user : FirebaseUser = Depends(get_current_user)) -> int:
+async def select_pool(pool: PortfolioCreationRequest,
+                      # user : FirebaseUser = Depends(get_current_user)
+                      ) -> int:
     """
     Selects Strategy pool from all strategies
     :param pool:
     :return: Portfolio ID
     """
-    return set_db_pool(pool,datetime.datetime.today().isoformat(),user.user_id)
+    return set_db_pool(pool,datetime.datetime.today().isoformat(),"temp")#user.user_id)
 
 @router.post("/ai-select-pool")
-async def ai_select_pool(req: AiPortfolioCreationRequest,user : FirebaseUser = Depends(get_current_user)) -> int:
+async def ai_select_pool(req: AiPortfolioCreationRequest,
+                         # user : FirebaseUser = Depends(get_current_user)
+                         ) -> int:
     """
     Selects Strategy pool from all strategies
     :param poolName:
@@ -49,7 +55,7 @@ async def ai_select_pool(req: AiPortfolioCreationRequest,user : FirebaseUser = D
         account=req.account,
         strategies=selectStrat(req.prompt),
     )
-    return set_db_pool(pool, datetime.datetime.today().isoformat(),user.user_id)
+    return set_db_pool(pool, datetime.datetime.today().isoformat(),"temp")#user.user_id)
 
 @router.post("/ai-select-portfolio")
 async def select_portfolio(pid: PortfolioID) -> List[str]:
@@ -102,17 +108,19 @@ async def seed_portfolio(portfolioWeights : PortfolioWeights) -> None:
     update_portfolio_weights(portfolioWeights.portfolio_id, weights)
 
 @router.get("/portfolios")
-async def get_portfolios(rankBy : str|None = None,limit:int|None = None,user : FirebaseUser = Depends(get_current_user)) -> PortfolioList:
+async def get_portfolios(rankBy : str|None = None,limit:int|None = None,
+                         # user : FirebaseUser = Depends(get_current_user)
+                         ) -> PortfolioList:
     """
     Returns a list of portfolios ranked by rankBy.
     :param limit: max number of portfolios to return
     :param rankBy:
     :return:
     """
-    if user.role != UserRole.PUBLIC:
-        return get_ranked_list(rankBy,limit)
-    else:
-        return get_secured_ranked_list(user.user_id,rankBy,limit)
+    # if user.role != UserRole.PUBLIC:
+    return get_ranked_list(rankBy,limit)
+    # else:
+    #     return get_secured_ranked_list(user.user_id,rankBy,limit)
 
 @router.get("/portfolio")
 async def get_portfolio(portfolioName : str) -> Portfolio:
