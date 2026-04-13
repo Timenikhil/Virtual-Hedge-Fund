@@ -40,5 +40,5 @@ class EXPERT(BaseEstimator, RegressorMixin):
     def partial_fit(self, X, y:np.ndarray):
         y = check_array(y, ensure_2d=False)
         self.arima_.update(y[0])
-        self.lssvm_.partial_fit(X,y)
+        self.lssvm_.partial_fit(X,y-self.arima_.predict(n_periods=X[0][0]))
         return self

@@ -56,6 +56,5 @@ def train_model(algo,prices:np.ndarray,sid) -> float:
     dump(model, f'./models/weights/{algo}-{sid}.joblib')
 
     return error
-    # To load ANY of them back
-    loaded_model = load('model_1.joblib')
+
 
