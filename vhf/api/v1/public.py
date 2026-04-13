@@ -39,7 +39,7 @@ async def select_pool(pool: PortfolioCreationRequest,
     :param pool:
     :return: Portfolio ID
     """
-    return set_db_pool(pool,datetime.datetime.today().isoformat(),"temp")#user.user_id)
+    return set_db_pool(pool,datetime.datetime.today().isoformat())#user.user_id)
 
 @router.post("/ai-select-pool")
 async def ai_select_pool(req: AiPortfolioCreationRequest,
@@ -55,7 +55,7 @@ async def ai_select_pool(req: AiPortfolioCreationRequest,
         account=req.account,
         strategies=selectStrat(req.prompt),
     )
-    return set_db_pool(pool, datetime.datetime.today().isoformat(),"temp")#user.user_id)
+    return set_db_pool(pool, datetime.datetime.today().isoformat())#user.user_id)
 
 @router.post("/ai-select-portfolio")
 async def select_portfolio(pid: PortfolioID) -> List[str]:
@@ -81,6 +81,9 @@ async def select_portfolio(portfolioReq : PortfolioSelectorRequest) -> List[str]
     """
     strategies = selectorStrat(get_sids(portfolioReq.portfolio_id),portfolioReq.selector,portfolioReq.k,portfolioReq.ranker.value)
     update_portfolio_strats(portfolioID=portfolioReq.portfolio_id,strats=strategies)
+    logger.debug(f"Portfolio {portfolioReq.portfolio_id}: selected via {portfolioReq.selector}",
+                 extra={"PID" : str(portfolioReq.portfolio_id),
+                 "Selector":str(portfolioReq.selector)})
     return strategies
 
 @router.post("/choose-portfolio")
@@ -93,6 +96,8 @@ async def choose_portfolio(portfolio : PortfolioRequest) -> None:
     :return:
     """
     update_portfolio_strats(portfolioID=portfolio.portfolio_id,strats=portfolio.strategies)
+    logger.debug(f"Portfolio {portfolio.portfolio_id}: chosen",
+                 extra={"PID" : str(portfolio.portfolio_id)})
 
 @router.post("/seed-portfolio")
 async def seed_portfolio(portfolioWeights : PortfolioWeights) -> None:
@@ -106,6 +111,8 @@ async def seed_portfolio(portfolioWeights : PortfolioWeights) -> None:
     total = sum(portfolioWeights.weights)
     weights = [x/total for x in portfolioWeights.weights]
     update_portfolio_weights(portfolioWeights.portfolio_id, weights)
+    logger.debug(f"Portfolio {portfolioWeights.portfolio_id}: seeded",
+                extra={"PID" : str(portfolioWeights.portfolio_id)})
 
 @router.get("/portfolios")
 async def get_portfolios(rankBy : str|None = None,limit:int|None = None,
@@ -147,6 +154,8 @@ async def delete_portfolio(portfolio_id : PortfolioID) -> None:
     :param portfolio:
     :return:
     """
+    logger.info(f"Portfolio {portfolio_id.portfolio_id}: deleted",
+                extra={"PID" : str(portfolio_id.portfolio_id)})
     return delete_db_portfolio_id(portfolio_id.portfolio_id)
 
 @router.get("/strategies")
@@ -177,7 +186,8 @@ async def set_allocator(portfolio_alloc : PortfolioAllocator) -> None:
     if allocator is not Buy and Hold (None), set up scheduler
 
     """
-
+    logger.info(f"Portfolio {portfolio_alloc.portfolio_id}: finalised",
+                extra={"PID" : str(portfolio_alloc.portfolio_id)})
     if portfolio_alloc.allocator is not None:
         set_db_allocator(portfolio_alloc.portfolio_id,portfolio_alloc.allocator.value)
         attach_scheduler(portfolio_alloc.portfolio_id,portfolio_alloc.interval)

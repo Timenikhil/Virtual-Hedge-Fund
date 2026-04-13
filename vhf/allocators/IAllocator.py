@@ -18,10 +18,12 @@ class IAllocator:
     1. scheduler is set up
     2. it reads algorithm name from db (or uses cached value)
     3. it calls the rebalance function of the allocator implementing this rebalance function
-    with the prices dataframe
+    with the prices dataframe and corresponding keyword arguments
     4. the algorithm returns a set of proposed weights
-    5. scheduler executes the trade
-    6. scheduler updates the portfolio weights in the db
+    5. Scheduler uses logger to log portfolio weights (optional)
+    6. scheduler executes the trade
+    7. scheduler updates the portfolio weights in the db
+    8. scheduler logs portfolio weights (optional)
 
     """
     def rebalance(self,prices:pd.DataFrame) -> np.ndarray[tuple[int], np.dtype[np.float64]]:
