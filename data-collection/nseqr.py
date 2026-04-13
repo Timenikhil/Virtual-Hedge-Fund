@@ -1,8 +1,7 @@
 import pandas as pd
-import numpy as np
 
 # 1. Load the raw yfinance CSV
-df = pd.read_csv("nifty50_historical_2020_2026.csv", header=[0, 1], index_col=0)
+df = pd.read_csv("nifty50_historical_2016_2026.csv", header=[0, 1], index_col=0)
 
 # 2. Reshape to Long format
 df_long = df.stack(level=0).reset_index()

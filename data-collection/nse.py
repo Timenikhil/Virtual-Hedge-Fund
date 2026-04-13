@@ -24,4 +24,4 @@ data = yf.download(nifty50_tickers, start=start_date, end=end_date, group_by='ti
 
 
 # Save to CSV for future use
-data.to_csv("nifty50_historical_2020_2026.csv")
+data.to_csv("nifty50_historical_2016_2026.csv")
