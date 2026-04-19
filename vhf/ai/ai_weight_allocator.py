@@ -76,8 +76,8 @@ def _build_prompt(context: dict[str, Any]) -> str:
 
     lines: list[str] = [
         f"Allocate across {len(strategies)} strategies. Performance metrics (daily prices, annualised where noted):\n",
-        f"{'Strategy':<26} {'Category':<14} {'1M Ret':>8} {'3M Ret':>8} {'1Y Ret':>8} {'Cum Ret':>9} {'Vol63d':>7} {'Sh1Y':>6} {'Sh2Y':>6} {'MaxDD':>8}",
-        "-" * 112,
+        f"{'Strategy':<26} {'Category':<14} {'1M Ret':>8} {'3M Ret':>8} {'1Y Ret':>8} {'Cum Ret':>9} {'Vol63d':>7} {'Sh1Y':>6} {'Sh2Y':>6} {'MaxDD':>8} {'Calmar':>7} {'Mom':>6}",
+        "-" * 127,
     ]
 
     for sd in strategy_data:
@@ -92,7 +92,9 @@ def _build_prompt(context: dict[str, Any]) -> str:
             f"{_fmt(m.get('vol_63d_ann_pct')):>7} "
             f"{_fmt(m.get('sharpe_252d'), suffix='', plus=True):>6} "
             f"{_fmt(m.get('sharpe_504d'), suffix='', plus=True):>6} "
-            f"{_fmt(m.get('max_drawdown_pct')):>8}"
+            f"{_fmt(m.get('max_drawdown_pct')):>8} "
+            f"{_fmt(m.get('calmar_ratio'), suffix='', plus=True):>7} "
+            f"{_fmt(m.get('momentum_ratio'), suffix='x', plus=True):>6}"
         )
 
     # Render correlation matrix as a lower-triangle table when available.

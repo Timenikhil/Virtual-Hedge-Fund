@@ -608,6 +608,41 @@ class CorrelationMatrixTest(unittest.TestCase):
         self.assertIn("sharpe_504d", m)
         self.assertIsNone(m["sharpe_504d"])
 
+    def test_calmar_ratio_computed(self):
+        # 300-day series with a clear drawdown: rises then falls back partway.
+        up = [100.0 * (1.002 ** i) for i in range(200)]
+        down = [up[-1] * (0.999 ** i) for i in range(100)]
+        prices = up + down
+        m = _compute_strategy_metrics(prices)
+        self.assertIn("calmar_ratio", m)
+        self.assertIsNotNone(m["calmar_ratio"])
+        # max drawdown must be negative; calmar sign depends on ann_return sign
+        self.assertIsInstance(m["calmar_ratio"], float)
+
+    def test_calmar_none_on_no_drawdown(self):
+        # Monotonically rising prices → max drawdown = 0 → calmar = None.
+        prices = [100.0 * (1.001 ** i) for i in range(300)]
+        m = _compute_strategy_metrics(prices)
+        self.assertIsNone(m["calmar_ratio"])
+
+    def test_momentum_ratio_computed(self):
+        # 300-day series: steady drift gives return_63d and return_252d both non-zero.
+        prices = [100.0 * (1.001 ** i) for i in range(300)]
+        m = _compute_strategy_metrics(prices)
+        self.assertIn("momentum_ratio", m)
+        self.assertIsNotNone(m["momentum_ratio"])
+        r63 = m["return_63d_pct"]
+        r252 = m["return_252d_pct"]
+        expected = round(r63 / r252, 3)
+        self.assertAlmostEqual(m["momentum_ratio"], expected, places=3)
+
+    def test_momentum_none_when_insufficient_data(self):
+        # Fewer than 253 prices → return_252d_pct is None → momentum_ratio is None.
+        prices = [100.0 * (1.001 ** i) for i in range(200)]
+        m = _compute_strategy_metrics(prices)
+        self.assertIsNone(m["return_252d_pct"])
+        self.assertIsNone(m["momentum_ratio"])
+
 
 class ClusterStrategiesTest(unittest.TestCase):
     """Tests for _cluster_strategies (agglomerative, complete linkage, signed distance)."""

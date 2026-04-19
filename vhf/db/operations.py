@@ -569,40 +569,45 @@ def claim_due_reconcile_jobs(
     with connection.db_lock:
         connection.connect()
         with closing(connection.client.cursor()) as cursor:
+            # Single atomic UPDATE — claims all qualifying jobs in one SQL statement.
+            # The WHERE ID IN (...) subquery simultaneously checks ENABLED, NEXT_RUN_AT,
+            # and stale-lock conditions, then sets LOCKED_AT/LOCKED_BY atomically.
+            cursor.execute(
+                f"""
+                UPDATE reconcile_jobs
+                SET LOCKED_AT = ?,
+                    LOCKED_BY = ?,
+                    UPDATED_AT = ?
+                WHERE ID IN (
+                    SELECT ID FROM reconcile_jobs
+                    WHERE ENABLED = 1
+                      AND (NEXT_RUN_AT IS NULL OR NEXT_RUN_AT <= ?)
+                      AND (LOCKED_AT IS NULL OR LOCKED_AT <= ?)
+                    ORDER BY ID ASC
+                    LIMIT ?
+                )
+                """,
+                (current_iso, worker_id, current_iso,
+                 current_iso, stale_lock_before, safe_limit),
+            )
+            connection.client.commit()
+
+            # Retrieve the rows just claimed — scoped by worker_id + timestamp
+            # (combination is unique within the db_lock window).
             cursor.execute(
                 f"""
                 SELECT {RECONCILE_JOB_SELECT_COLUMNS}
                 FROM reconcile_jobs
-                WHERE ENABLED = 1
-                  AND (NEXT_RUN_AT IS NULL OR NEXT_RUN_AT <= ?)
-                  AND (LOCKED_AT IS NULL OR LOCKED_AT <= ?)
+                WHERE LOCKED_BY = ?
+                  AND LOCKED_AT = ?
                 ORDER BY ID ASC
                 LIMIT ?
                 """,
-                (current_iso, stale_lock_before, safe_limit),
+                (worker_id, current_iso, safe_limit),
             )
             rows = cursor.fetchall()
 
-            claimed_ids: list[int] = []
-            for row in rows:
-                job_id = int(row[0])
-                cursor.execute(
-                    """
-                    UPDATE reconcile_jobs
-                    SET LOCKED_AT = ?,
-                        LOCKED_BY = ?,
-                        UPDATED_AT = ?
-                    WHERE ID = ?
-                      AND (LOCKED_AT IS NULL OR LOCKED_AT <= ?)
-                    """,
-                    (current_iso, worker_id, current_iso, job_id, stale_lock_before),
-                )
-                if cursor.rowcount == 1:
-                    claimed_ids.append(job_id)
-
-            connection.client.commit()
-
-    return [get_reconcile_job(job_id) for job_id in claimed_ids]
+    return [_row_to_reconcile_job(row) for row in rows]
 
 
 def set_reconcile_job_enabled(job_id: int, enabled: bool) -> ReconcileJob:

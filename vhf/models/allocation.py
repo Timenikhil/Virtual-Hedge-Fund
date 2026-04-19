@@ -21,7 +21,7 @@ class AIProviderMode(str, Enum):
     disabled = "disabled"
 
 
-DEFAULT_AI_TIMEOUT_SECONDS = 10.0
+DEFAULT_AI_TIMEOUT_SECONDS = 30.0
 
 
 class AllocationRequest(BaseModel):

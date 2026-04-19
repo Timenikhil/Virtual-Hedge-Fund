@@ -221,6 +221,31 @@ def _compute_strategy_metrics(prices: list[float]) -> dict[str, Any]:
                 max_dd = min(max_dd, (p - peak) / peak * 100)
         return round(max_dd, 2)
 
+    def _annualised_return_pct() -> float | None:
+        """Full-history annualised return: ((end/start)^(252/n) - 1) * 100."""
+        if n < 2 or prices[0] <= 0:
+            return None
+        ratio = prices[-1] / prices[0]
+        if ratio <= 0:
+            return None
+        return round((ratio ** (252.0 / n) - 1) * 100, 2)
+
+    def _calmar() -> float | None:
+        """Calmar ratio: annualised return / |max drawdown|."""
+        ann = _annualised_return_pct()
+        mdd = _max_drawdown()  # negative percent, e.g. -25.0
+        if ann is None or mdd == 0:
+            return None
+        return round(ann / abs(mdd), 3)
+
+    def _momentum() -> float | None:
+        """Short-term (3M) return relative to long-term (1Y): return_63d / return_252d."""
+        r63 = _period_return(63)
+        r252 = _period_return(252)
+        if r63 is None or r252 is None or r252 == 0:
+            return None
+        return round(r63 / r252, 3)
+
     cum_start = prices[0]
     cumulative = round((prices[-1] - cum_start) / cum_start * 100, 2) if cum_start else None
 
@@ -233,6 +258,8 @@ def _compute_strategy_metrics(prices: list[float]) -> dict[str, Any]:
         "sharpe_252d":      _sharpe(252),
         "sharpe_504d":      _sharpe(504),
         "max_drawdown_pct": _max_drawdown(),
+        "calmar_ratio":     _calmar(),
+        "momentum_ratio":   _momentum(),
         "n_periods":        n,
     }
 
