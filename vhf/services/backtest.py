@@ -280,6 +280,66 @@ def _compute_correlation_matrix(
     ]
 
 
+def _cluster_strategies(
+    correlation_matrix: list[list[float]] | None,
+    strategy_ids: list[str],
+    threshold: float = 0.5,
+) -> dict[str, int] | None:
+    """
+    Agglomerative clustering (complete linkage) of strategies by signed correlation distance.
+
+    distance(i, j) = 1 - corr(i, j)
+    Clusters merge when their complete-linkage distance < (1 - threshold),
+    i.e. minimum pairwise correlation > threshold.
+
+    Uses signed (not absolute) correlation distance so that negatively correlated
+    strategies (e.g. bonds vs equity) remain in separate clusters — preserving
+    their diversification value rather than grouping them as structurally similar.
+
+    Returns {strategy_id: cluster_label} (0-indexed int), or None when
+    the matrix is None or fewer than 2 strategies are provided.
+    """
+    n = len(strategy_ids)
+    if correlation_matrix is None or n < 2:
+        return None
+
+    dist_threshold = 1.0 - threshold
+
+    # Build distance matrix: dist(i, j) = 1 - corr(i, j)
+    dist: list[list[float]] = [
+        [0.0 if i == j else 1.0 - correlation_matrix[i][j]
+         for j in range(n)]
+        for i in range(n)
+    ]
+
+    # Start with each strategy in its own singleton cluster.
+    clusters: list[frozenset[int]] = [frozenset({i}) for i in range(n)]
+
+    def _cluster_dist(a: frozenset[int], b: frozenset[int]) -> float:
+        """Complete linkage: maximum pairwise distance between members."""
+        return max(dist[i][j] for i in a for j in b)
+
+    while len(clusters) > 1:
+        best_dist, best_i, best_j = float("inf"), -1, -1
+        nc = len(clusters)
+        for ci in range(nc):
+            for cj in range(ci + 1, nc):
+                d = _cluster_dist(clusters[ci], clusters[cj])
+                if d < best_dist:
+                    best_dist, best_i, best_j = d, ci, cj
+        if best_dist >= dist_threshold:
+            break  # remaining pairs too dissimilar — stop merging
+        merged = clusters[best_i] | clusters[best_j]
+        clusters.pop(best_j)   # remove higher index first to avoid shift
+        clusters[best_i] = merged
+
+    labels: dict[str, int] = {}
+    for label, cluster in enumerate(clusters):
+        for idx in cluster:
+            labels[strategy_ids[idx]] = label
+    return labels
+
+
 def _build_backtest_ai_context(
     strategy_ids: list[str],
     strategy_meta: dict[str, dict],
@@ -309,6 +369,10 @@ def _build_backtest_ai_context(
     corr = _compute_correlation_matrix(strategy_ids, prices_up_to)
     if corr is not None:
         ctx["correlation_matrix"] = corr
+
+    clusters = _cluster_strategies(corr, strategy_ids)
+    if clusters is not None:
+        ctx["strategy_clusters"] = clusters
 
     if extra_context:
         ctx["request_context"] = extra_context

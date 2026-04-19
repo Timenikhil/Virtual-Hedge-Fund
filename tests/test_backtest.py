@@ -11,6 +11,7 @@ from vhf.models.allocation import AllocationMethod
 from vhf.services.backtest import (
     BacktestError,
     BacktestRequest,
+    _cluster_strategies,
     _compute_correlation_matrix,
     _compute_strategy_metrics,
     _compute_weights,
@@ -606,6 +607,63 @@ class CorrelationMatrixTest(unittest.TestCase):
         m = _compute_strategy_metrics([100.0])
         self.assertIn("sharpe_504d", m)
         self.assertIsNone(m["sharpe_504d"])
+
+
+class ClusterStrategiesTest(unittest.TestCase):
+    """Tests for _cluster_strategies (agglomerative, complete linkage, signed distance)."""
+
+    def _corr2(self, r: float) -> list[list[float]]:
+        return [[1.0, r], [r, 1.0]]
+
+    def _corr3(self, r12: float, r13: float, r23: float) -> list[list[float]]:
+        return [
+            [1.0,  r12, r13],
+            [r12,  1.0, r23],
+            [r13,  r23, 1.0],
+        ]
+
+    def test_none_on_none_matrix(self):
+        self.assertIsNone(_cluster_strategies(None, ["s1", "s2"]))
+
+    def test_none_on_single_strategy(self):
+        self.assertIsNone(_cluster_strategies([[1.0]], ["s1"]))
+
+    def test_high_corr_same_cluster(self):
+        result = _cluster_strategies(self._corr2(0.9), ["s1", "s2"], threshold=0.5)
+        self.assertIsNotNone(result)
+        self.assertEqual(result["s1"], result["s2"])
+
+    def test_low_corr_separate_clusters(self):
+        result = _cluster_strategies(self._corr2(0.1), ["s1", "s2"], threshold=0.5)
+        self.assertIsNotNone(result)
+        self.assertNotEqual(result["s1"], result["s2"])
+
+    def test_negative_corr_separate_clusters(self):
+        # Signed distance: dist(-0.8) = 1 - (-0.8) = 1.8 >= dist_threshold(0.5) → separate
+        result = _cluster_strategies(self._corr2(-0.8), ["s1", "s2"], threshold=0.5)
+        self.assertIsNotNone(result)
+        self.assertNotEqual(result["s1"], result["s2"])
+
+    def test_all_ids_present_in_output(self):
+        sids = ["alpha", "beta", "gamma"]
+        corr = self._corr3(0.8, 0.1, 0.1)
+        result = _cluster_strategies(corr, sids, threshold=0.5)
+        self.assertIsNotNone(result)
+        self.assertEqual(set(result.keys()), set(sids))
+
+    def test_labels_are_zero_indexed_ints(self):
+        result = _cluster_strategies(self._corr2(0.1), ["s1", "s2"], threshold=0.5)
+        self.assertIsNotNone(result)
+        self.assertTrue(all(isinstance(v, int) for v in result.values()))
+        self.assertIn(0, result.values())
+
+    def test_three_way_partial_clustering(self):
+        # s1-s2 highly correlated (0.9), s3 uncorrelated (0.1) with both
+        corr = self._corr3(r12=0.9, r13=0.1, r23=0.1)
+        result = _cluster_strategies(corr, ["s1", "s2", "s3"], threshold=0.5)
+        self.assertIsNotNone(result)
+        self.assertEqual(result["s1"], result["s2"])
+        self.assertNotEqual(result["s1"], result["s3"])
 
 
 if __name__ == "__main__":

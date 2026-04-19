@@ -95,5 +95,46 @@ class AllocateWeightsTest(unittest.TestCase):
             allocate_weights({"strategies": [], "strategy_data": []})
 
 
+class BuildPromptClusterTest(unittest.TestCase):
+    """Tests for the strategy-cluster section in _build_prompt."""
+
+    def _ctx(self, sids: list[str], clusters: dict[str, int] | None = None) -> dict:
+        return {
+            "strategies": sids,
+            "strategy_data": [
+                {"strategy_id": s, "category": "equity", "metrics": {}}
+                for s in sids
+            ],
+            **({"strategy_clusters": clusters} if clusters is not None else {}),
+        }
+
+    def test_section_present_when_clusters_provided(self):
+        prompt = _build_prompt(self._ctx(["s1", "s2", "s3"], {"s1": 0, "s2": 0, "s3": 1}))
+        self.assertIn("Strategy clusters", prompt)
+        self.assertIn("Cluster 1:", prompt)
+        self.assertIn("Cluster 2:", prompt)
+
+    def test_section_absent_when_no_clusters(self):
+        prompt = _build_prompt(self._ctx(["s1", "s2"]))
+        self.assertNotIn("Strategy clusters", prompt)
+
+    def test_guidance_text_present(self):
+        prompt = _build_prompt(self._ctx(["s1", "s2"], {"s1": 0, "s2": 1}))
+        self.assertIn("Diversify capital across clusters", prompt)
+        self.assertIn("intra-cluster", prompt)
+
+    def test_section_absent_on_wrong_length(self):
+        # clusters dict has only 1 of 3 strategies — guard should suppress rendering
+        prompt = _build_prompt(self._ctx(["s1", "s2", "s3"], {"s1": 0}))
+        self.assertNotIn("Strategy clusters", prompt)
+
+    def test_members_in_prompt_order(self):
+        # strategies order: s1, s2, s3 — s1 and s3 share cluster 0
+        prompt = _build_prompt(self._ctx(["s1", "s2", "s3"], {"s1": 0, "s2": 1, "s3": 0}))
+        # s1 should appear before s3 within the cluster line (prompt iteration order)
+        cluster1_line = [l for l in prompt.splitlines() if "Cluster 1:" in l][0]
+        self.assertLess(cluster1_line.index("s1"), cluster1_line.index("s3"))
+
+
 if __name__ == "__main__":
     unittest.main()

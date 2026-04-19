@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from datetime import datetime, timezone
 
-from vhf.services.backtest import _compute_strategy_metrics, _compute_correlation_matrix
+from vhf.services.backtest import _compute_strategy_metrics, _compute_correlation_matrix, _cluster_strategies
 from typing import Any
 
 from vhf.ai.weight_allocator_provider import (
@@ -143,6 +143,10 @@ def _build_ai_context(portfolio: Portfolio, request: AllocationRequest) -> dict[
     corr = _compute_correlation_matrix(strategy_ids, prices_dict)
     if corr is not None:
         context["correlation_matrix"] = corr
+
+    clusters = _cluster_strategies(corr, strategy_ids)
+    if clusters is not None:
+        context["strategy_clusters"] = clusters
 
     if request.ai_context is not None:
         # Keep partner integration flexible: caller can pass arbitrary feature payload.

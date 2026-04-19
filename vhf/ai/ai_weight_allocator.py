@@ -44,6 +44,13 @@ even when its standalone return is lower.
   unless a category has both negative Sharpe AND high positive correlation to all others.
 - Weight reduction should be gradual: avoid concentrating >60% in a single category.
 
+CLUSTER-AWARE ALLOCATION (HRP-inspired):
+When strategy clusters are provided, apply a two-level approach: first allocate \
+capital across clusters to maximise diversification (inter-cluster), then tilt \
+within each cluster toward the strategy with the superior Sharpe ratio (intra-cluster). \
+Each cluster is one diversification unit — do not concentrate more than its share in \
+any single strategy unless it is the sole cluster member.
+
 Rules:
 - Return ONLY a JSON array of weights, one per strategy, in the same order as the input.
 - All weights must be non-negative numbers.
@@ -64,6 +71,7 @@ def _build_prompt(context: dict[str, Any]) -> str:
     strategy_data: list[dict] = context.get("strategy_data", [])
     current_weights: list[float] | None = context.get("current_weights")
     correlation_matrix: list[list[float]] | None = context.get("correlation_matrix")
+    strategy_clusters: dict[str, int] | None = context.get("strategy_clusters")
     request_context: dict | None = context.get("request_context")
 
     lines: list[str] = [
@@ -106,6 +114,23 @@ def _build_prompt(context: dict[str, Any]) -> str:
                 for j in range(len(strategies))
             )
             lines.append(f"{sid:<26}{row_vals}")
+
+    if strategy_clusters and len(strategy_clusters) == len(strategies):
+        cluster_map: dict[int, list[str]] = {}
+        for sid in strategies:
+            label = strategy_clusters.get(sid)
+            if label is not None:
+                cluster_map.setdefault(label, []).append(sid)
+        lines.append(
+            "\nStrategy clusters (hierarchical clustering on 252-day return correlations, "
+            "\u03c1 > 0.50 threshold):"
+        )
+        for label in sorted(cluster_map):
+            lines.append(f"  Cluster {label + 1}: {', '.join(cluster_map[label])}")
+        lines.append(
+            "\nGuidance: Diversify capital across clusters (inter-cluster). "
+            "Within each cluster, tilt toward the strategy with the better Sharpe ratio (intra-cluster)."
+        )
 
     if current_weights and len(current_weights) == len(strategies):
         cw_str = ", ".join(f"{w:.3f}" for w in current_weights)
