@@ -25,6 +25,31 @@ class AllocationServiceError(ValueError):
     pass
 
 
+def _retry_hint(error: str, expected_len: int) -> str:
+    """Return a targeted re-prompt instruction based on the parse/validation error."""
+    if "length mismatch" in error or f"expected {expected_len}" in error:
+        return (
+            f"You returned the wrong number of values. "
+            f"Return exactly {expected_len} values, one per strategy, in the same order as the input."
+        )
+    if "is negative" in error:
+        return "All weights must be non-negative. Replace any negative values with 0."
+    if "is not finite" in error or "is not a valid number" in error:
+        return "All weights must be finite numbers. Replace NaN, Infinity, or non-numeric values with 0."
+    if "sum must be greater than 0" in error:
+        return "At least one weight must be positive. Do not return all zeros."
+    if "Expected list or dict" in error or "missing weights" in error:
+        return (
+            f"Return a JSON array of exactly {expected_len} numbers: [w1, w2, ...]. "
+            "Do not return an object or any other structure."
+        )
+    # Fallback: generic parse failure (no JSON array found, markdown wrapper, etc.)
+    return (
+        f"Return ONLY a JSON array of exactly {expected_len} numbers. "
+        "No markdown, no explanation, no extra text."
+    )
+
+
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -207,6 +232,7 @@ def allocate_portfolio(request: AllocationRequest) -> AllocationResult:
     ai_provider_mode = None
     ai_provider_name: str | None = None
     ai_provider_error: str | None = None
+    ai_retry_count = 0
 
     if request.method == AllocationMethod.equal_weight:
         # Deterministic baseline allocator.
@@ -227,30 +253,45 @@ def allocate_portfolio(request: AllocationRequest) -> AllocationResult:
         ai_provider_mode = resolved_mode
         ai_provider_name = getattr(provider, "name", None)
 
-        try:
-            ai_context = _build_ai_context(portfolio, request)
-            provider_output = provider.allocate(ai_context, timeout_seconds=request.ai_timeout_seconds)
-            raw_weights = _extract_ai_weights(provider_output, strategies)
-        except (WeightAllocatorProviderError, AllocationServiceError) as exc:
-            ai_provider_error = str(exc)
-            if request.ai_strict:
-                raise AllocationServiceError(
-                    f"ai_weighted allocation failed in strict mode: {exc}"
-                ) from exc
+        ai_context = _build_ai_context(portfolio, request)
+        last_parse_error: str | None = None
 
-            fallback_applied = True
-            fallback_reason = "ai_weighted provider failed; used equal_weight fallback"
-            raw_weights = _equal_weights(n)
-        except Exception as exc:
-            ai_provider_error = str(exc)
-            if request.ai_strict:
-                raise AllocationServiceError(
-                    f"ai_weighted allocation failed in strict mode: {exc}"
-                ) from exc
+        for attempt in range(1 + request.ai_max_retries):
+            if last_parse_error is not None:
+                ai_context["_retry"] = {
+                    "attempt": attempt,
+                    "parse_error": last_parse_error,
+                    "hint": _retry_hint(last_parse_error, n),
+                }
+                ai_retry_count += 1
 
-            fallback_applied = True
-            fallback_reason = "ai_weighted provider failed; used equal_weight fallback"
-            raw_weights = _equal_weights(n)
+            try:
+                provider_output = provider.allocate(ai_context, timeout_seconds=request.ai_timeout_seconds)
+                raw_weights = _extract_ai_weights(provider_output, strategies)
+                break
+            except (WeightAllocatorProviderError, AllocationServiceError) as exc:
+                last_parse_error = str(exc)
+                if attempt == request.ai_max_retries:
+                    ai_provider_error = last_parse_error
+                    if request.ai_strict:
+                        raise AllocationServiceError(
+                            f"ai_weighted allocation failed after {ai_retry_count} retries in strict mode: {exc}"
+                        ) from exc
+                    fallback_applied = True
+                    fallback_reason = (
+                        f"ai_weighted provider failed after {ai_retry_count} retries; used equal_weight fallback"
+                    )
+                    raw_weights = _equal_weights(n)
+            except Exception as exc:
+                ai_provider_error = str(exc)
+                if request.ai_strict:
+                    raise AllocationServiceError(
+                        f"ai_weighted allocation failed in strict mode: {exc}"
+                    ) from exc
+                fallback_applied = True
+                fallback_reason = "ai_weighted provider failed; used equal_weight fallback"
+                raw_weights = _equal_weights(n)
+                break
 
     else:
         # Manual mode can come from request payload or previously stored portfolio weights.
@@ -282,6 +323,7 @@ def allocate_portfolio(request: AllocationRequest) -> AllocationResult:
         ai_provider_mode=ai_provider_mode,
         ai_provider_name=ai_provider_name,
         ai_provider_error=ai_provider_error,
+        ai_retry_count=ai_retry_count,
         generated_at=_utc_now_iso(),
     )
 
@@ -300,6 +342,7 @@ def allocate_portfolio(request: AllocationRequest) -> AllocationResult:
                 "ai_provider_mode": result.ai_provider_mode.value if result.ai_provider_mode else None,
                 "ai_provider_name": result.ai_provider_name,
                 "ai_provider_error": result.ai_provider_error,
+                "ai_retry_count": result.ai_retry_count,
             },
             created_at=result.generated_at,
         )

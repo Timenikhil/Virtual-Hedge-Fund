@@ -141,6 +141,14 @@ def _build_prompt(context: dict[str, Any]) -> str:
     if request_context:
         lines.append(f"\nAdditional context: {json.dumps(request_context)}")
 
+    retry_info: dict | None = context.get("_retry")
+    if retry_info:
+        lines.append(
+            f"\n\u26a0 Retry attempt {retry_info['attempt']}. Your previous response could not be parsed:\n"
+            f"  {retry_info['parse_error']}\n"
+            f"{retry_info.get('hint', 'Respond with ONLY a JSON array of numbers. No explanation, no markdown, no extra text.')}"
+        )
+
     lines.append(f"\nReturn a JSON array of exactly {len(strategies)} non-negative weights.")
 
     return "\n".join(lines)

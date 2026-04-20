@@ -4,7 +4,7 @@ from unittest.mock import patch
 from vhf.models.allocation import AIProviderMode, AllocationMethod, AllocationRequest
 from vhf.models.portfolio import Portfolio
 from vhf.models.strategy import StrategyPrice
-from vhf.services.allocation_service import AllocationServiceError, allocate_portfolio
+from vhf.services.allocation_service import AllocationServiceError, allocate_portfolio, _retry_hint
 
 
 class FakeProvider:
@@ -263,6 +263,234 @@ class AllocationServiceTest(unittest.TestCase):
 
         self.assertIn("strict mode", str(ctx.exception))
         mock_record.assert_not_called()
+
+
+class RetryHintTest(unittest.TestCase):
+    def test_length_mismatch_names_expected_count(self):
+        hint = _retry_hint("ai_response length mismatch: expected 3, got 1", 3)
+        self.assertIn("3", hint)
+        self.assertIn("exactly", hint)
+
+    def test_negative_weight(self):
+        hint = _retry_hint("ai_response[1] is negative: -0.5", 3)
+        self.assertIn("non-negative", hint)
+
+    def test_non_finite(self):
+        hint = _retry_hint("ai_response[0] is not finite: nan", 3)
+        self.assertIn("finite", hint)
+
+    def test_non_numeric(self):
+        hint = _retry_hint("ai_response[2] is not a valid number: 'high'", 3)
+        self.assertIn("finite", hint)
+
+    def test_all_zeros(self):
+        hint = _retry_hint("ai_response sum must be greater than 0.", 3)
+        self.assertIn("positive", hint)
+
+    def test_wrong_structure_list_expected(self):
+        hint = _retry_hint("Unsupported AI provider response type. Expected list or dict.", 3)
+        self.assertIn("JSON array", hint)
+
+    def test_missing_weights_key(self):
+        hint = _retry_hint("AI provider response missing weights. Supported shapes: list, ...", 3)
+        self.assertIn("JSON array", hint)
+
+    def test_generic_parse_failure(self):
+        hint = _retry_hint("Could not parse 3 weights from model response: '...'", 3)
+        self.assertIn("JSON array", hint)
+
+
+class FakeSequentialProvider:
+    """Provider whose responses/errors are consumed in order across allocate() calls."""
+
+    def __init__(self, side_effects: list, name: str = "fake-seq"):
+        self._effects = list(side_effects)
+        self.name = name
+        self.calls: list[dict] = []
+
+    def allocate(self, context, *, timeout_seconds):
+        self.calls.append(dict(context))
+        effect = self._effects.pop(0)
+        if isinstance(effect, Exception):
+            raise effect
+        return effect
+
+
+class AIRetryTest(unittest.TestCase):
+    """Verify the Tier-1.5 retry layer behaviour."""
+
+    def _portfolio_with_two_strategies(self):
+        return Portfolio(
+            portfolio_id=99,
+            portfolio_name="retry-test",
+            strategies=["s1", "s2"],
+            weights=None,
+            live=False,
+        )
+
+    def _strat_side_effects(self):
+        return [
+            StrategyPrice(strategy_id="s1", name="S1", description="", category="eq", prices=[1.0, 1.1]),
+            StrategyPrice(strategy_id="s2", name="S2", description="", category="eq", prices=[1.0, 0.9]),
+            # get_db_strat is called a second time for correlation; provide extras.
+            StrategyPrice(strategy_id="s1", name="S1", description="", category="eq", prices=[1.0, 1.1]),
+            StrategyPrice(strategy_id="s2", name="S2", description="", category="eq", prices=[1.0, 0.9]),
+        ]
+
+    @patch("vhf.services.allocation_service.record_allocation_snapshot")
+    @patch("vhf.services.allocation_service.resolve_allocator_provider")
+    @patch("vhf.services.allocation_service.get_db_strat")
+    @patch("vhf.services.allocation_service.get_db_portfolio_id")
+    def test_succeeds_on_second_attempt(
+        self, mock_get_portfolio, mock_get_strat, mock_resolve_provider, mock_record
+    ):
+        from vhf.ai.weight_allocator_provider import WeightAllocatorProviderError
+
+        provider = FakeSequentialProvider([
+            WeightAllocatorProviderError("parse error on attempt 0"),
+            [0.6, 0.4],
+        ])
+        mock_resolve_provider.return_value = (AIProviderMode.local, provider)
+        mock_get_portfolio.return_value = self._portfolio_with_two_strategies()
+        mock_get_strat.side_effect = self._strat_side_effects()
+
+        result = allocate_portfolio(
+            AllocationRequest(portfolio_id=99, method=AllocationMethod.ai_weighted, ai_max_retries=1)
+        )
+
+        self.assertFalse(result.fallback_applied)
+        self.assertEqual(result.ai_retry_count, 1)
+        self.assertEqual(len(provider.calls), 2)
+        self.assertAlmostEqual(result.target_weights[0], 0.6)
+        self.assertAlmostEqual(result.target_weights[1], 0.4)
+
+    @patch("vhf.services.allocation_service.record_allocation_snapshot")
+    @patch("vhf.services.allocation_service.resolve_allocator_provider")
+    @patch("vhf.services.allocation_service.get_db_strat")
+    @patch("vhf.services.allocation_service.get_db_portfolio_id")
+    def test_fallback_after_all_retries_exhausted(
+        self, mock_get_portfolio, mock_get_strat, mock_resolve_provider, mock_record
+    ):
+        from vhf.ai.weight_allocator_provider import WeightAllocatorProviderError
+
+        provider = FakeSequentialProvider([
+            WeightAllocatorProviderError("first fail"),
+            WeightAllocatorProviderError("second fail"),
+        ])
+        mock_resolve_provider.return_value = (AIProviderMode.local, provider)
+        mock_get_portfolio.return_value = self._portfolio_with_two_strategies()
+        mock_get_strat.side_effect = self._strat_side_effects()
+
+        result = allocate_portfolio(
+            AllocationRequest(portfolio_id=99, method=AllocationMethod.ai_weighted, ai_max_retries=1)
+        )
+
+        self.assertTrue(result.fallback_applied)
+        self.assertEqual(result.ai_retry_count, 1)
+        self.assertEqual(len(provider.calls), 2)
+        self.assertAlmostEqual(result.target_weights[0], 0.5)
+        self.assertAlmostEqual(result.target_weights[1], 0.5)
+
+    @patch("vhf.services.allocation_service.record_allocation_snapshot")
+    @patch("vhf.services.allocation_service.resolve_allocator_provider")
+    @patch("vhf.services.allocation_service.get_db_strat")
+    @patch("vhf.services.allocation_service.get_db_portfolio_id")
+    def test_transport_error_skips_retry(
+        self, mock_get_portfolio, mock_get_strat, mock_resolve_provider, mock_record
+    ):
+        provider = FakeSequentialProvider([RuntimeError("network down")])
+        mock_resolve_provider.return_value = (AIProviderMode.remote, provider)
+        mock_get_portfolio.return_value = self._portfolio_with_two_strategies()
+        mock_get_strat.side_effect = self._strat_side_effects()
+
+        result = allocate_portfolio(
+            AllocationRequest(portfolio_id=99, method=AllocationMethod.ai_weighted, ai_max_retries=2)
+        )
+
+        self.assertTrue(result.fallback_applied)
+        self.assertEqual(result.ai_retry_count, 0)
+        self.assertEqual(len(provider.calls), 1)
+
+    @patch("vhf.services.allocation_service.record_allocation_snapshot")
+    @patch("vhf.services.allocation_service.resolve_allocator_provider")
+    @patch("vhf.services.allocation_service.get_db_strat")
+    @patch("vhf.services.allocation_service.get_db_portfolio_id")
+    def test_strict_mode_raises_after_retries(
+        self, mock_get_portfolio, mock_get_strat, mock_resolve_provider, mock_record
+    ):
+        from vhf.ai.weight_allocator_provider import WeightAllocatorProviderError
+
+        provider = FakeSequentialProvider([
+            WeightAllocatorProviderError("fail 1"),
+            WeightAllocatorProviderError("fail 2"),
+        ])
+        mock_resolve_provider.return_value = (AIProviderMode.local, provider)
+        mock_get_portfolio.return_value = self._portfolio_with_two_strategies()
+        mock_get_strat.side_effect = self._strat_side_effects()
+
+        with self.assertRaises(AllocationServiceError) as ctx:
+            allocate_portfolio(
+                AllocationRequest(
+                    portfolio_id=99,
+                    method=AllocationMethod.ai_weighted,
+                    ai_max_retries=1,
+                    ai_strict=True,
+                )
+            )
+
+        self.assertIn("strict mode", str(ctx.exception))
+
+    @patch("vhf.services.allocation_service.record_allocation_snapshot")
+    @patch("vhf.services.allocation_service.resolve_allocator_provider")
+    @patch("vhf.services.allocation_service.get_db_strat")
+    @patch("vhf.services.allocation_service.get_db_portfolio_id")
+    def test_retry_context_injected_into_ai_context(
+        self, mock_get_portfolio, mock_get_strat, mock_resolve_provider, mock_record
+    ):
+        from vhf.ai.weight_allocator_provider import WeightAllocatorProviderError
+
+        error_msg = "could not parse weights"
+        provider = FakeSequentialProvider([
+            WeightAllocatorProviderError(error_msg),
+            [0.5, 0.5],
+        ])
+        mock_resolve_provider.return_value = (AIProviderMode.local, provider)
+        mock_get_portfolio.return_value = self._portfolio_with_two_strategies()
+        mock_get_strat.side_effect = self._strat_side_effects()
+
+        allocate_portfolio(
+            AllocationRequest(portfolio_id=99, method=AllocationMethod.ai_weighted, ai_max_retries=1)
+        )
+
+        self.assertEqual(len(provider.calls), 2)
+        retry_ctx = provider.calls[1].get("_retry")
+        self.assertIsNotNone(retry_ctx, "_retry key must be present on second call")
+        self.assertEqual(retry_ctx["attempt"], 1)
+        self.assertEqual(retry_ctx["parse_error"], error_msg)
+        self.assertIn("hint", retry_ctx, "hint must be present in retry context")
+        self.assertTrue(len(retry_ctx["hint"]) > 0)
+
+    @patch("vhf.services.allocation_service.record_allocation_snapshot")
+    @patch("vhf.services.allocation_service.resolve_allocator_provider")
+    @patch("vhf.services.allocation_service.get_db_strat")
+    @patch("vhf.services.allocation_service.get_db_portfolio_id")
+    def test_zero_retries_behaves_as_before(
+        self, mock_get_portfolio, mock_get_strat, mock_resolve_provider, mock_record
+    ):
+        from vhf.ai.weight_allocator_provider import WeightAllocatorProviderError
+
+        provider = FakeSequentialProvider([WeightAllocatorProviderError("parse fail")])
+        mock_resolve_provider.return_value = (AIProviderMode.local, provider)
+        mock_get_portfolio.return_value = self._portfolio_with_two_strategies()
+        mock_get_strat.side_effect = self._strat_side_effects()
+
+        result = allocate_portfolio(
+            AllocationRequest(portfolio_id=99, method=AllocationMethod.ai_weighted, ai_max_retries=0)
+        )
+
+        self.assertTrue(result.fallback_applied)
+        self.assertEqual(result.ai_retry_count, 0)
+        self.assertEqual(len(provider.calls), 1)
 
 
 if __name__ == "__main__":

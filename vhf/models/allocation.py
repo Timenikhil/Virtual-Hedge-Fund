@@ -34,6 +34,8 @@ class AllocationRequest(BaseModel):
     ai_provider_mode: AIProviderMode | None = None
     # For `method=ai_weighted`: fail hard on provider error instead of fallback.
     ai_strict: bool = False
+    # Max parse/validation retries before fallback (0 = no retries, max 2).
+    ai_max_retries: int = Field(default=1, ge=0, le=2)
     # Timeout override for remote/local provider execution.
     ai_timeout_seconds: float = Field(default=DEFAULT_AI_TIMEOUT_SECONDS, gt=0.0)
     # Optional caller-supplied context merged into AI payload.
@@ -55,4 +57,5 @@ class AllocationResult(BaseModel):
     ai_provider_mode: AIProviderMode | None = None
     ai_provider_name: str | None = None
     ai_provider_error: str | None = None
+    ai_retry_count: int = 0
     generated_at: str = Field(description="UTC ISO timestamp")
