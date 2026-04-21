@@ -309,7 +309,34 @@ X-API-Key: <ADMIN_API_KEY>
 poetry run python -m unittest discover -s tests -p 'test_*.py'
 ```
 
-137 tests across allocation, rebalance, reconcile, scheduler, selector, backtest, backtest sync, and persistence logic. All DB and network calls are mocked.
+186 tests across allocation, rebalance, reconcile, scheduler, selector, backtest, backtest sync, and persistence logic. All DB and network calls are mocked.
+
+### Concurrency correctness (`tests/test_stress.py`)
+
+7 in-process tests using `ThreadPoolExecutor` + `Barrier` to verify thread-safety invariants under concurrent load: no duplicate reconcile-job claims, flaky/dead provider fallback, per-thread retry-state isolation, and stale-lock reclaim. Runs as part of the main suite in ~25 ms.
+
+### Load / stress harness (`tests/load/`)
+
+External load generator ([Locust](https://locust.io/)) against a live uvicorn process on `127.0.0.1:8001`, backed by a seeded SQLite DB and a local fake AI allocator — exercises the full request path and produces distributional metrics (p50/p95/p99, throughput, error rate).
+
+```bash
+# Terminal 1 — seed + serve
+poetry run poe load-seed      # fresh DB at /tmp/vhf_load.db (20 portfolios × 10 strategies × 252 days)
+poetry run poe load-serve     # uvicorn on :8001 with AI_ALLOCATOR_MODE=local
+
+# Terminal 2 — pick a profile
+poetry run poe load-run       # Locust web UI
+poetry run poe load-headless  # 50 users / 2 min baseline, CSVs in tests/load/out/
+```
+
+| Profile  | Users | Spawn rate | Run time | Purpose |
+|---|---|---|---|---|
+| Smoke    | 1    | 1/s  | 30s | Harness sanity |
+| Baseline | 10   | 2/s  | 2m  | Steady-state numbers |
+| Stress   | 100  | 10/s | 5m  | Find the SQLite `db_lock` knee |
+| Degraded | 20   | 2/s  | 3m  | Set `FAKE_ALLOCATOR_SLEEP_MS=500` before `load-serve` to simulate slow LLM |
+
+Fake allocator knobs: `FAKE_ALLOCATOR_SLEEP_MS`, `FAKE_ALLOCATOR_FAIL_RATE`.
 
 ---
 

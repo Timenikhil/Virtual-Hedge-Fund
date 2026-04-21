@@ -23,6 +23,7 @@ matplotlib = "^3.10.8"
 [tool.poetry.group.dev.dependencies]
 poethepoet = "^0.27.0"
 pytest = "^9.0.2"
+locust = "^2.32.0"
 
 [tool.poe.tasks]
 # QuantRocket containers — start once, rarely need restarting
@@ -42,6 +43,31 @@ build-all = "docker compose -f docker-compose.quantrocket.yml -f docker-compose.
 down = "docker compose -f docker-compose.quantrocket.yml -f docker-compose.vhf.yml down"
 ps = "docker compose -f docker-compose.quantrocket.yml -f docker-compose.vhf.yml ps"
 logs-api = "docker compose -f docker-compose.vhf.yml logs -f vhf-api"
+
+# ---------------------------------------------------------------------------
+# Load / stress testing (Locust). See tests/load/README-esque docstrings.
+# Run load-seed once, then load-serve in one terminal and load-run /
+# load-headless in another.
+# ---------------------------------------------------------------------------
+[tool.poe.tasks.load-seed]
+help = "Seed a fresh load-test SQLite DB (20 portfolios × 10 strategies × 252 days)."
+cmd = "python -m tests.load.seed"
+env = { DB_PATH = "/tmp/vhf_load.db" }
+
+[tool.poe.tasks.load-serve]
+help = "Start uvicorn against the load-test DB with a local fake AI allocator."
+cmd = "uvicorn vhf.main:app --host 127.0.0.1 --port 8001"
+env = { DB_PATH = "/tmp/vhf_load.db", AI_ALLOCATOR_MODE = "local", AI_ALLOCATOR_LOCAL_MODULE = "tests.load.fake_allocator", AI_ALLOCATOR_LOCAL_FUNCTION = "allocate_weights", ADMIN_API_KEY = "load-test-key" }
+
+[tool.poe.tasks.load-run]
+help = "Launch Locust with the web UI against the local load-serve process."
+cmd = "locust -f tests/load/locustfile.py --host http://127.0.0.1:8001"
+env = { LOAD_ADMIN_API_KEY = "load-test-key" }
+
+[tool.poe.tasks.load-headless]
+help = "Headless baseline run: 50 users, 2 minutes, CSV output in tests/load/out/."
+cmd = "locust -f tests/load/locustfile.py --host http://127.0.0.1:8001 --headless --users 50 --spawn-rate 5 --run-time 2m --csv=tests/load/out/run"
+env = { LOAD_ADMIN_API_KEY = "load-test-key" }
 
 [build-system]
 requires = ["poetry-core"]

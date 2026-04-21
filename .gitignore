@@ -13,3 +13,7 @@ frontend/portfolio-management/next-env.d.ts
 
 # Ignore local database files
 vhf.db*
+
+# Locust load-test CSV outputs (keep dir via .gitkeep)
+tests/load/out/*
+!tests/load/out/.gitkeep
